@@ -25,10 +25,6 @@ class AzureDevOpsBot extends TeamsActivityHandler {
     this.sessions = new Map();
 
     this.onMessage(async (context, next) => {
-      const text = (context.activity.text || "")
-        .replace(/<[^>]+>/g, "")
-        .toLowerCase()
-        .trim();
       const convId = context.activity.conversation.id;
 
       if (!this.sessions.has(convId)) {
@@ -36,8 +32,22 @@ class AzureDevOpsBot extends TeamsActivityHandler {
           bugs: [],
           scheduledBug: null,
           aiFix: null,
+          repos: [],
         });
       }
+
+      // Handle Adaptive Card submit actions (e.g. repo selector for PR list)
+      const cardValue = context.activity.value;
+      if (cardValue && cardValue.action === "select_repo") {
+        await this.showPRsForRepo(context, convId, cardValue.repoId);
+        await next();
+        return;
+      }
+
+      const text = (context.activity.text || "")
+        .replace(/<[^>]+>/g, "")
+        .toLowerCase()
+        .trim();
 
       const scheduleMatch = text.match(/schedule\s+bug\s+(\d+)/);
       const wantsPR =
@@ -56,6 +66,8 @@ class AzureDevOpsBot extends TeamsActivityHandler {
         await this.scheduleBug(context, convId, parseInt(scheduleMatch[1]));
       } else if (wantsPR) {
         await this.raisePR(context, convId);
+      } else if (text.includes("list pr") || text.includes("show pr") || text === "prs") {
+        await this.showRepoSelector(context, convId);
       } else if (text.includes("sprint")) {
         await this.showSprint(context);
       } else if (text.includes("pipeline") || text.includes("build")) {
@@ -476,12 +488,195 @@ Key tests to verify the fix works correctly.`;
     }
   }
 
+  async showRepoSelector(context, convId) {
+    try {
+      await context.sendActivity({ type: "typing" });
+
+      const res = await axios.get(
+        `${BASE_URL}/git/repositories?api-version=7.1`,
+        { headers: HEADERS },
+      );
+      const repos = res.data.value;
+
+      if (!repos?.length) {
+        await context.sendActivity("No repositories found in this project.");
+        return;
+      }
+
+      // Cache repos in session for later lookup
+      this.sessions.get(convId).repos = repos;
+
+      const card = {
+        $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+        type: "AdaptiveCard",
+        version: "1.5",
+        body: [
+          {
+            type: "TextBlock",
+            text: "🔀 List Pull Requests",
+            size: "Large",
+            weight: "Bolder",
+          },
+          {
+            type: "TextBlock",
+            text: "Select a repository to view its pull requests:",
+            wrap: true,
+            spacing: "Small",
+          },
+          {
+            type: "Input.ChoiceSet",
+            id: "repoId",
+            style: "compact",
+            placeholder: "Choose a repository...",
+            choices: repos.map((r) => ({ title: r.name, value: r.id })),
+          },
+        ],
+        actions: [
+          {
+            type: "Action.Submit",
+            title: "View PRs",
+            data: { action: "select_repo" },
+          },
+        ],
+      };
+
+      await context.sendActivity(
+        MessageFactory.attachment(CardFactory.adaptiveCard(card)),
+      );
+    } catch (err) {
+      console.error(
+        "showRepoSelector error:",
+        err.response?.data || err.message,
+      );
+      await context.sendActivity("Could not fetch repositories.");
+    }
+  }
+
+  async showPRsForRepo(context, convId, repoId) {
+    try {
+      await context.sendActivity({ type: "typing" });
+
+      const session = this.sessions.get(convId);
+      const repo = (session.repos || []).find((r) => r.id === repoId);
+      const repoName = repo?.name || repoId;
+
+      const res = await axios.get(
+        `${BASE_URL}/git/repositories/${repoId}/pullrequests?searchCriteria.status=all&$top=20&api-version=7.1`,
+        { headers: HEADERS },
+      );
+      const prs = res.data.value;
+
+      if (!prs?.length) {
+        await context.sendActivity(
+          `No pull requests found for **${repoName}**.`,
+        );
+        return;
+      }
+
+      const statusColor = (s) =>
+        ({ active: "Accent", completed: "Good", abandoned: "Attention" })[s] ||
+        "Default";
+
+      const statusEmoji = (s) =>
+        ({ active: "🟡", completed: "✅", abandoned: "❌" })[s] || "⚪";
+
+      const card = {
+        $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+        type: "AdaptiveCard",
+        version: "1.5",
+        body: [
+          {
+            type: "TextBlock",
+            text: `🔀 Pull Requests — ${repoName}`,
+            size: "Large",
+            weight: "Bolder",
+          },
+          {
+            type: "TextBlock",
+            text: `Showing ${prs.length} most recent PR(s)`,
+            isSubtle: true,
+            size: "Small",
+            spacing: "None",
+          },
+          ...prs.map((pr) => {
+            const src = pr.sourceRefName.replace("refs/heads/", "");
+            const tgt = pr.targetRefName.replace("refs/heads/", "");
+            const date = new Date(pr.creationDate).toLocaleDateString();
+            const prUrl = `https://dev.azure.com/${ORG}/${PROJECT}/_git/${repoName}/pullrequest/${pr.pullRequestId}`;
+
+            return {
+              type: "ColumnSet",
+              separator: true,
+              selectAction: { type: "Action.OpenUrl", url: prUrl },
+              columns: [
+                {
+                  type: "Column",
+                  width: "stretch",
+                  items: [
+                    {
+                      type: "TextBlock",
+                      text: `${statusEmoji(pr.status)} **#${pr.pullRequestId}** · ${pr.title}`,
+                      wrap: true,
+                      size: "Small",
+                      weight: "Bolder",
+                    },
+                    {
+                      type: "TextBlock",
+                      text: `\`${src}\` → \`${tgt}\``,
+                      isSubtle: true,
+                      size: "Small",
+                      spacing: "None",
+                      wrap: true,
+                    },
+                    {
+                      type: "TextBlock",
+                      text: `👤 ${pr.createdBy?.displayName || "Unknown"} · 📅 ${date}`,
+                      isSubtle: true,
+                      size: "Small",
+                      spacing: "None",
+                    },
+                  ],
+                },
+                {
+                  type: "Column",
+                  width: "auto",
+                  items: [
+                    {
+                      type: "TextBlock",
+                      text:
+                        pr.status.charAt(0).toUpperCase() + pr.status.slice(1),
+                      size: "Small",
+                      color: statusColor(pr.status),
+                    },
+                  ],
+                },
+              ],
+            };
+          }),
+        ],
+      };
+
+      await context.sendActivity(
+        MessageFactory.attachment(CardFactory.adaptiveCard(card)),
+      );
+    } catch (err) {
+      console.error(
+        "showPRsForRepo error:",
+        err.response?.data || err.message,
+      );
+      await context.sendActivity(
+        "Could not fetch pull requests. Please try again.",
+      );
+    }
+  }
+
   async showHelp(context) {
     await context.sendActivity(
       "🤖 **StewMate — Your Dev Assistant:**\n\n" +
         "🐛 `show bugs` — List all open bugs in the project\n" +
         "🔧 `schedule bug 2` — AI writes a code fix for bug #2 from the list\n" +
         "🔀 `raise PR` — Create a PR in ADO with the AI-generated fix\n" +
+        "📋 `list PRs` — Browse pull requests by repository\n" +
         "🏃 `sprint status` — Current sprint info\n" +
         "🚀 `pipeline status` — List pipelines\n" +
         "📁 `list repos` — List git repositories in the project",

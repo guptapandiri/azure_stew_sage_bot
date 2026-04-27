@@ -41,6 +41,10 @@
               "description": "AI writes a code fix for the selected issue"
             },
             {
+              "title": "list PRs",
+              "description": "Browse pull requests by repository"
+            },
+            {
               "title": "raise PR",
               "description": "Create a PR with the AI-generated fix"
             },
