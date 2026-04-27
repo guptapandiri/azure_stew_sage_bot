@@ -1,0 +1,28 @@
+{
+  "name": "stewmate",
+  "version": "1.0.0",
+  "description": "StewMate — Stewart's AI-powered one-stop dev assistant",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js",
+    "ngrok": "ngrok http 3979"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.91.0",
+    "@google/generative-ai": "^0.24.1",
+    "axios": "^1.15.2",
+    "botbuilder": "^4.23.3",
+    "botbuilder-core": "^4.23.3",
+    "botbuilder-dialogs": "^4.16.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "ngrok": "^5.0.0-beta.2",
+    "openai": "^6.34.0",
+    "restify": "^4.3.0"
+  }
+}

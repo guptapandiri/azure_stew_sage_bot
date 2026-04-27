@@ -1,0 +1,63 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.3",
+  "id": "d6aec572-2dcc-431e-8450-79bc3562c2a6",
+  "developer": {
+    "name": "Stewart",
+    "websiteUrl": "https://www.stewart.com",
+    "privacyUrl": "https://www.stewart.com/en/privacy-policy",
+    "termsOfUseUrl": "https://www.stewart.com/en/terms-of-use"
+  },
+  "name": {
+    "short": "StewSage Bot",
+    "full": "StewSage - Stewart AI Dev Assistant"
+  },
+  "description": {
+    "short": "AI-powered dev assistant for Stewart",
+    "full": "StewSage helps developers view issues, get AI-generated code fixes, and raise PRs all from Teams. Created by Niharika Goel, Stewart."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#0052CC",
+  "bots": [
+    {
+      "botId": "66fe0683-9ffe-43a1-bd31-87b998ea1d37",
+      "scopes": ["personal", "team", "groupchat"],
+      "supportsFiles": false,
+      "isNotificationOnly": false,
+      "commandLists": [
+        {
+          "scopes": ["personal", "team", "groupchat"],
+          "commands": [
+            {
+              "title": "show bugs",
+              "description": "List all open issues in the project"
+            },
+            {
+              "title": "schedule bug 1",
+              "description": "AI writes a code fix for the selected issue"
+            },
+            {
+              "title": "raise PR",
+              "description": "Create a PR with the AI-generated fix"
+            },
+            {
+              "title": "sprint status",
+              "description": "Show current sprint info"
+            },
+            { "title": "pipeline status", "description": "List pipelines" },
+            {
+              "title": "list repos",
+              "description": "List all repos in the project"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": []
+}
