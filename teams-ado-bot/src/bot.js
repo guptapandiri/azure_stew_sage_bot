@@ -33,6 +33,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
           scheduledBug: null,
           aiFix: null,
           repos: [],
+          prFlow: {},
         });
       }
 
@@ -40,6 +41,21 @@ class AzureDevOpsBot extends TeamsActivityHandler {
       const cardValue = context.activity.value;
       if (cardValue && cardValue.action === "select_repo") {
         await this.showPRsForRepo(context, convId, cardValue.repoId);
+        await next();
+        return;
+      }
+      if (cardValue && cardValue.action === "select_repo_for_pr") {
+        await this.showSourceBranchSelector(context, convId, cardValue.repoId);
+        await next();
+        return;
+      }
+      if (cardValue && cardValue.action === "select_source_branch") {
+        await this.showTargetBranchSelector(context, convId, cardValue.sourceBranch);
+        await next();
+        return;
+      }
+      if (cardValue && cardValue.action === "select_target_branch") {
+        await this.createPRFromBranches(context, convId, cardValue.targetBranch);
         await next();
         return;
       }
@@ -66,6 +82,8 @@ class AzureDevOpsBot extends TeamsActivityHandler {
         await this.scheduleBug(context, convId, parseInt(scheduleMatch[1]));
       } else if (wantsPR) {
         await this.raisePR(context, convId);
+      } else if (text.includes("raise pr") || text.includes("create pr")) {
+        await this.showRepoSelectorForPR(context, convId);
       } else if (text.includes("list pr") || text.includes("show pr") || text === "prs") {
         await this.showRepoSelector(context, convId);
       } else if (text.includes("sprint")) {
@@ -670,12 +688,339 @@ Key tests to verify the fix works correctly.`;
     }
   }
 
+  async showRepoSelectorForPR(context, convId) {
+    try {
+      await context.sendActivity({ type: "typing" });
+
+      const res = await axios.get(
+        `${BASE_URL}/git/repositories?api-version=7.1`,
+        { headers: HEADERS },
+      );
+      const repos = res.data.value;
+
+      if (!repos?.length) {
+        await context.sendActivity("No repositories found in this project.");
+        return;
+      }
+
+      this.sessions.get(convId).repos = repos;
+
+      const card = {
+        $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+        type: "AdaptiveCard",
+        version: "1.5",
+        body: [
+          {
+            type: "TextBlock",
+            text: "🔀 Raise a Pull Request",
+            size: "Large",
+            weight: "Bolder",
+          },
+          {
+            type: "TextBlock",
+            text: "Step 1: Select the repository",
+            wrap: true,
+            spacing: "Small",
+          },
+          {
+            type: "Input.ChoiceSet",
+            id: "repoId",
+            style: "compact",
+            placeholder: "Choose a repository...",
+            choices: repos.map((r) => ({ title: r.name, value: r.id })),
+          },
+        ],
+        actions: [
+          {
+            type: "Action.Submit",
+            title: "Next →",
+            data: { action: "select_repo_for_pr" },
+          },
+        ],
+      };
+
+      await context.sendActivity(
+        MessageFactory.attachment(CardFactory.adaptiveCard(card)),
+      );
+    } catch (err) {
+      console.error(
+        "showRepoSelectorForPR error:",
+        err.response?.data || err.message,
+      );
+      await context.sendActivity("Could not fetch repositories.");
+    }
+  }
+
+  async showSourceBranchSelector(context, convId, repoId) {
+    try {
+      await context.sendActivity({ type: "typing" });
+
+      const session = this.sessions.get(convId);
+      const repo = (session.repos || []).find((r) => r.id === repoId);
+      session.prFlow = { repoId, repoName: repo?.name || repoId };
+
+      const res = await axios.get(
+        `${BASE_URL}/git/repositories/${repoId}/refs?filter=heads&api-version=7.1`,
+        { headers: HEADERS },
+      );
+      const branches = res.data.value || [];
+
+      if (!branches.length) {
+        await context.sendActivity("No branches found in this repository.");
+        return;
+      }
+
+      session.prFlow.branches = branches;
+
+      const card = {
+        $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+        type: "AdaptiveCard",
+        version: "1.5",
+        body: [
+          {
+            type: "TextBlock",
+            text: `🔀 Raise PR — ${session.prFlow.repoName}`,
+            size: "Large",
+            weight: "Bolder",
+          },
+          {
+            type: "TextBlock",
+            text: "Step 2: Select the **source** branch (branch with your changes)",
+            wrap: true,
+            spacing: "Small",
+          },
+          {
+            type: "Input.ChoiceSet",
+            id: "sourceBranch",
+            style: "compact",
+            placeholder: "Choose source branch...",
+            choices: branches.map((b) => {
+              const name = b.name.replace("refs/heads/", "");
+              return { title: name, value: name };
+            }),
+          },
+        ],
+        actions: [
+          {
+            type: "Action.Submit",
+            title: "Next →",
+            data: { action: "select_source_branch" },
+          },
+        ],
+      };
+
+      await context.sendActivity(
+        MessageFactory.attachment(CardFactory.adaptiveCard(card)),
+      );
+    } catch (err) {
+      console.error(
+        "showSourceBranchSelector error:",
+        err.response?.data || err.message,
+      );
+      await context.sendActivity("Could not fetch branches.");
+    }
+  }
+
+  async showTargetBranchSelector(context, convId, sourceBranch) {
+    try {
+      const session = this.sessions.get(convId);
+      session.prFlow.sourceBranch = sourceBranch;
+
+      const branches = session.prFlow.branches || [];
+      const targetBranches = branches.filter(
+        (b) => b.name.replace("refs/heads/", "") !== sourceBranch,
+      );
+
+      if (!targetBranches.length) {
+        await context.sendActivity(
+          "No other branches available as target.",
+        );
+        return;
+      }
+
+      const card = {
+        $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+        type: "AdaptiveCard",
+        version: "1.5",
+        body: [
+          {
+            type: "TextBlock",
+            text: `🔀 Raise PR — ${session.prFlow.repoName}`,
+            size: "Large",
+            weight: "Bolder",
+          },
+          {
+            type: "TextBlock",
+            text: `Source: \`${sourceBranch}\``,
+            wrap: true,
+            spacing: "Small",
+          },
+          {
+            type: "TextBlock",
+            text: "Step 3: Select the **target** branch (branch to merge into)",
+            wrap: true,
+            spacing: "Small",
+          },
+          {
+            type: "Input.ChoiceSet",
+            id: "targetBranch",
+            style: "compact",
+            placeholder: "Choose target branch...",
+            choices: targetBranches.map((b) => {
+              const name = b.name.replace("refs/heads/", "");
+              return { title: name, value: name };
+            }),
+          },
+        ],
+        actions: [
+          {
+            type: "Action.Submit",
+            title: "Create PR 🚀",
+            data: { action: "select_target_branch" },
+          },
+        ],
+      };
+
+      await context.sendActivity(
+        MessageFactory.attachment(CardFactory.adaptiveCard(card)),
+      );
+    } catch (err) {
+      console.error(
+        "showTargetBranchSelector error:",
+        err.response?.data || err.message,
+      );
+      await context.sendActivity("Could not prepare branch selection.");
+    }
+  }
+
+  async createPRFromBranches(context, convId, targetBranch) {
+    try {
+      const session = this.sessions.get(convId);
+      const { repoId, repoName, sourceBranch } = session.prFlow;
+      session.prFlow.targetBranch = targetBranch;
+
+      await context.sendActivity({ type: "typing" });
+      await context.sendActivity(
+        `🔍 Comparing \`${sourceBranch}\` → \`${targetBranch}\` in **${repoName}**...`,
+      );
+
+      // Fetch diff between branches
+      const diffRes = await axios.get(
+        `${BASE_URL}/git/repositories/${repoId}/diffs/commits?baseVersion=${encodeURIComponent(targetBranch)}&targetVersion=${encodeURIComponent(sourceBranch)}&baseVersionType=branch&targetVersionType=branch&api-version=7.1`,
+        { headers: HEADERS },
+      );
+      const changes = (diffRes.data.changes || []).slice(0, 50);
+      const changeSummary = changes
+        .map((c) => `${c.changeType}: ${c.item?.path || "unknown"}`)
+        .join("\n");
+
+      // Fetch commits between branches
+      const commitsRes = await axios.get(
+        `${BASE_URL}/git/repositories/${repoId}/commits?searchCriteria.compareVersion.version=${encodeURIComponent(targetBranch)}&searchCriteria.compareVersion.versionType=branch&searchCriteria.itemVersion.version=${encodeURIComponent(sourceBranch)}&searchCriteria.itemVersion.versionType=branch&$top=30&api-version=7.1`,
+        { headers: HEADERS },
+      );
+      const commits = commitsRes.data.value || [];
+      const commitSummary = commits.map((c) => `- ${c.comment}`).join("\n");
+
+      if (!changes.length && !commits.length) {
+        await context.sendActivity(
+          `No differences found between \`${sourceBranch}\` and \`${targetBranch}\`. Nothing to merge.`,
+        );
+        session.prFlow = {};
+        return;
+      }
+
+      await context.sendActivity(
+        "🤖 Generating PR description from branch differences...",
+      );
+      await context.sendActivity({ type: "typing" });
+
+      const prompt = `You are a senior software engineer. Generate a clear, professional pull request title and description based on the following branch comparison.
+
+Source branch: ${sourceBranch}
+Target branch: ${targetBranch}
+Repository: ${repoName}
+
+Commits (${commits.length}):
+${commitSummary || "No commit messages available."}
+
+File changes (${changes.length}):
+${changeSummary || "No file changes detected."}
+
+Respond in EXACTLY this format:
+PR_TITLE: <a concise PR title>
+
+PR_DESCRIPTION:
+<a well-structured PR description in markdown, including:
+- Summary of changes
+- List of key modifications
+- Any notable files changed>`;
+
+      let prTitle, prDescription;
+      try {
+        const result = await openai.chat.completions.create({
+          model: "gpt-3.5-turbo",
+          max_tokens: 2048,
+          messages: [{ role: "user", content: prompt }],
+        });
+        const aiResponse = result.choices[0].message.content;
+
+        const titleMatch = aiResponse.match(/PR_TITLE:\s*(.+)/);
+        prTitle = titleMatch
+          ? titleMatch[1].trim()
+          : `Merge ${sourceBranch} into ${targetBranch}`;
+
+        const descMatch = aiResponse.match(/PR_DESCRIPTION:\s*([\s\S]+)/);
+        prDescription = descMatch ? descMatch[1].trim() : aiResponse;
+      } catch (aiErr) {
+        console.warn(
+          "AI unavailable, using auto-generated description:",
+          aiErr.message,
+        );
+        prTitle = `Merge ${sourceBranch} into ${targetBranch}`;
+        prDescription = `## Summary\n\nMerge \`${sourceBranch}\` → \`${targetBranch}\`\n\n### Commits (${commits.length})\n${commitSummary || "N/A"}\n\n### Files Changed (${changes.length})\n${changeSummary || "N/A"}`;
+      }
+
+      await context.sendActivity("🔀 Creating Pull Request...");
+
+      const prRes = await axios.post(
+        `${BASE_URL}/git/repositories/${repoId}/pullrequests?api-version=7.1`,
+        {
+          title: prTitle,
+          description: prDescription,
+          sourceRefName: `refs/heads/${sourceBranch}`,
+          targetRefName: `refs/heads/${targetBranch}`,
+        },
+        { headers: HEADERS },
+      );
+
+      const prUrl = `https://dev.azure.com/${ORG}/${PROJECT}/_git/${repoName}/pullrequest/${prRes.data.pullRequestId}`;
+      session.prFlow = {};
+
+      await context.sendActivity(
+        `✅ **PR Created Successfully!**\n\n` +
+          `🔗 [View PR #${prRes.data.pullRequestId}](${prUrl})\n` +
+          `📌 \`${sourceBranch}\` → \`${targetBranch}\`\n` +
+          `📁 Repo: **${repoName}**\n\n` +
+          `**Title:** ${prTitle}`,
+      );
+    } catch (err) {
+      console.error(
+        "createPRFromBranches error:",
+        JSON.stringify(err.response?.data || err.message, null, 2),
+      );
+      await context.sendActivity(
+        "Could not create PR. Check that the PAT has **Code (Read & Write)** permission.",
+      );
+    }
+  }
+
   async showHelp(context) {
     await context.sendActivity(
       "🤖 **StewMate — Your Dev Assistant:**\n\n" +
         "🐛 `show bugs` — List all open bugs in the project\n" +
         "🔧 `schedule bug 2` — AI writes a code fix for bug #2 from the list\n" +
-        "🔀 `raise PR` — Create a PR in ADO with the AI-generated fix\n" +
+        "🔀 `raise PR` — Select repo & branches, auto-generate description, and create a PR\n" +
         "📋 `list PRs` — Browse pull requests by repository\n" +
         "🏃 `sprint status` — Current sprint info\n" +
         "🚀 `pipeline status` — List pipelines\n" +
