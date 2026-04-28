@@ -54,7 +54,15 @@ async function runAgenticFixFlow(context, session, repo, bugDetails) {
     await context.sendActivity(`🤖 **Step 1/2** — Identifying relevant files (${filePaths.length} total)...`);
     await context.sendActivity({ type: "typing" });
 
-    const selectedPaths = await selectFilesToInvestigate(bugDetails, filePaths);
+    let selectedPaths;
+    try {
+      selectedPaths = await selectFilesToInvestigate(bugDetails, filePaths);
+    } catch (aiErr) {
+      console.error("selectFilesToInvestigate failed:", aiErr.message);
+      await context.sendActivity(`❌ AI file selection failed: ${aiErr.message}\n\nCheck that \`GOOGLE_API_KEY\` / \`OPENAI_API_KEY\` is set correctly in Railway.`);
+      return;
+    }
+
     if (!selectedPaths.length) {
       await context.sendActivity(
         "AI could not identify relevant files for this bug. Try adding more detail to the bug description.",
@@ -75,7 +83,15 @@ async function runAgenticFixFlow(context, session, repo, bugDetails) {
     await context.sendActivity("🤖 **Step 2/2** — Generating code fix...");
     await context.sendActivity({ type: "typing" });
 
-    const fixedFiles = await generateCodeFix(bugDetails, files);
+    let fixedFiles;
+    try {
+      fixedFiles = await generateCodeFix(bugDetails, files);
+    } catch (aiErr) {
+      console.error("generateCodeFix failed:", aiErr.message);
+      await context.sendActivity(`❌ AI code generation failed: ${aiErr.message}`);
+      return;
+    }
+
     if (!fixedFiles.length) {
       await context.sendActivity(
         "AI could not generate a code fix for this bug. Please fix it manually or refine the bug description.",
