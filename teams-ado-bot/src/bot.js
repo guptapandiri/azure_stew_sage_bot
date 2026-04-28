@@ -85,7 +85,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
       const parsed = await intentParser.parseIntent(text);
 
       if (parsed) {
-        await this.dispatch(context, convId, parsed);
+        await this.dispatch(context, convId, parsed, text);
       } else {
         // Fallback regex routing when AI parser is unavailable
         console.warn("[bot] AI intent parser unavailable — using regex fallback");
@@ -129,7 +129,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
     });
   }
 
-  async dispatch(context, convId, { intent, params = {} }) {
+  async dispatch(context, convId, { intent, params = {} }, originalText = "") {
     const session = this.sessions.get(convId);
     switch (intent) {
       case "show_work_items": {
@@ -163,8 +163,28 @@ class AzureDevOpsBot extends TeamsActivityHandler {
       case "list_repos":
         await this.showRepos(context);
         break;
+      case "chat":
+        await this.handleChat(context, originalText);
+        break;
       default:
         await this.showHelp(context);
+    }
+  }
+
+  async handleChat(context, text) {
+    try {
+      await context.sendActivity({ type: "typing" });
+      const prompt = `You are StewSage, an AI developer assistant embedded in Microsoft Teams for the Stewart engineering team. You help developers with code questions, debugging, architecture decisions, code reviews, and general software engineering topics.
+
+Be concise and practical. Use markdown formatting — code blocks for code, bullet points for lists. If the question is vague, give a focused answer and offer to go deeper.
+
+Developer's message:
+${text}`;
+      const response = await generateText(prompt);
+      await context.sendActivity(response);
+    } catch (err) {
+      console.error("handleChat error:", err.message);
+      await context.sendActivity(`❌ AI unavailable: ${err.message}\n\nMake sure \`AI_PROVIDER\` is set correctly in your environment.`);
     }
   }
 

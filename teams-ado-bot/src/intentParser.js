@@ -15,7 +15,10 @@ Available intents:
 - "pipeline_logs": View failed pipeline logs. params: {}
 - "pipeline_status": View pipeline or build status. params: {}
 - "list_repos": View repositories. params: {}
-- "help": Unknown request or explicit help. params: {}
+- "chat": Any general question, coding help, debugging, explanation, architecture advice, or open-ended conversation not covered by the commands above. params: {}
+- "help": User explicitly asks for help or a list of commands. params: {}
+
+Use "chat" for anything the user wants answered. Use "help" only when the user explicitly asks for commands or says something completely unintelligible.
 
 Examples:
 "show bugs" → {"intent":"show_work_items","params":{"types":["Bug"]}}
