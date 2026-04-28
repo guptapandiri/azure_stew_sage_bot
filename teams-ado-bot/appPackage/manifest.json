@@ -10,7 +10,7 @@
     "termsOfUseUrl": "https://www.stewart.com/en/terms-of-use"
   },
   "name": {
-    "short": "StewSage Bot",
+    "short": "StewSage - Dev Assistant",
     "full": "StewSage - Stewart AI Dev Assistant"
   },
   "description": {
@@ -43,6 +43,10 @@
             {
               "title": "list PRs",
               "description": "Browse pull requests by repository"
+            },
+            {
+              "title": "run pipeline",
+              "description": "Run a selected pipeline"
             },
             {
               "title": "raise PR",
