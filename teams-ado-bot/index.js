@@ -70,8 +70,15 @@ app.post("/api/webhooks/build-complete", async (req, res) => {
 
     // Send proactive message to all active conversations
     const refs = bot.getConversationReferences();
-    for (const [, ref] of refs) {
+    console.log(`[webhook] Build #${buildNumber} ${result}. Notifying ${refs.size} conversation(s)...`);
+
+    if (refs.size === 0) {
+      console.warn("[webhook] No conversation references stored. Someone must message the bot first after deploy.");
+    }
+
+    for (const [convId, ref] of refs) {
       try {
+        console.log(`[webhook] Sending to conversation: ${convId}`);
         await adapter.continueConversationAsync(
           process.env.BOT_APP_ID,
           ref,
@@ -79,8 +86,9 @@ app.post("/api/webhooks/build-complete", async (req, res) => {
             await turnContext.sendActivity(message);
           },
         );
+        console.log(`[webhook] Successfully notified: ${convId}`);
       } catch (err) {
-        console.error(`Failed to notify conversation ${ref.conversation?.id}:`, err.message);
+        console.error(`[webhook] Failed to notify ${convId}:`, err.message);
       }
     }
 

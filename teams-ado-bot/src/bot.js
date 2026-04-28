@@ -2,6 +2,7 @@ const {
   TeamsActivityHandler,
   MessageFactory,
   CardFactory,
+  TurnContext,
 } = require("botbuilder");
 const axios = require("axios");
 const { ORG, PROJECT, BASE_URL, HEADERS } = require("./adoConfig");
@@ -139,15 +140,9 @@ class AzureDevOpsBot extends TeamsActivityHandler {
   }
 
   _addConversationReference(activity) {
-    const ref = {
-      activityId: activity.id,
-      user: activity.from,
-      bot: activity.recipient,
-      conversation: activity.conversation,
-      channelId: activity.channelId,
-      serviceUrl: activity.serviceUrl,
-    };
-    this.conversationReferences.set(activity.conversation.id, ref);
+    const ref = TurnContext.getConversationReference(activity);
+    this.conversationReferences.set(ref.conversation.id, ref);
+    console.log(`[bot] Stored conversation ref: ${ref.conversation.id} (total: ${this.conversationReferences.size})`);
   }
 
   getConversationReferences() {
