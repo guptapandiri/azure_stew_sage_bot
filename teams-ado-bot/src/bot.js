@@ -15,8 +15,16 @@ class AzureDevOpsBot extends TeamsActivityHandler {
   constructor() {
     super();
     this.sessions = new Map();
+    this.conversationReferences = new Map();
+
+    // Store conversation reference on every incoming activity
+    this.onConversationsUpdate(async (context, next) => {
+      this._addConversationReference(context.activity);
+      await next();
+    });
 
     this.onMessage(async (context, next) => {
+      this._addConversationReference(context.activity);
       const convId = context.activity.conversation.id;
 
       if (!this.sessions.has(convId)) {
@@ -118,6 +126,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
     });
 
     this.onMembersAdded(async (context, next) => {
+      this._addConversationReference(context.activity);
       for (const member of context.activity.membersAdded) {
         if (member.id !== context.activity.recipient.id) {
           await context.sendActivity(
@@ -127,6 +136,22 @@ class AzureDevOpsBot extends TeamsActivityHandler {
       }
       await next();
     });
+  }
+
+  _addConversationReference(activity) {
+    const ref = {
+      activityId: activity.id,
+      user: activity.from,
+      bot: activity.recipient,
+      conversation: activity.conversation,
+      channelId: activity.channelId,
+      serviceUrl: activity.serviceUrl,
+    };
+    this.conversationReferences.set(activity.conversation.id, ref);
+  }
+
+  getConversationReferences() {
+    return this.conversationReferences;
   }
 
   async dispatch(context, convId, { intent, params = {} }, originalText = "") {
