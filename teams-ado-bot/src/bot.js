@@ -18,7 +18,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
     this.conversationReferences = new Map();
 
     // Store conversation reference on every incoming activity
-    this.onConversationsUpdate(async (context, next) => {
+    this.onConversationUpdate(async (context, next) => {
       this._addConversationReference(context.activity);
       await next();
     });
