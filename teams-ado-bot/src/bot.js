@@ -4,20 +4,9 @@ const {
   CardFactory,
 } = require("botbuilder");
 const axios = require("axios");
-const OpenAI = require("openai");
+const { ORG, PROJECT, BASE_URL, HEADERS } = require("./adoConfig");
+const agenticFix = require("./agenticFix");
 
-// 
-const ORG = process.env.ADO_ORG;
-const PROJECT = process.env.ADO_PROJECT;
-const PAT = process.env.ADO_PAT;
-const BASE_URL = `https://dev.azure.com/${ORG}/${PROJECT}/_apis`;
-const AUTH = Buffer.from(`:${PAT}`).toString("base64");
-const HEADERS = {
-  Authorization: `Basic ${AUTH}`,
-  "Content-Type": "application/json",
-};
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 class AzureDevOpsBot extends TeamsActivityHandler {
   constructor() {
@@ -32,6 +21,9 @@ class AzureDevOpsBot extends TeamsActivityHandler {
           bugs: [],
           scheduledBug: null,
           aiFix: null,
+          fixedFiles: null,
+          fixRepo: null,
+          pendingFixBug: null,
           repos: [],
           prFlow: {},
         });
@@ -59,18 +51,23 @@ class AzureDevOpsBot extends TeamsActivityHandler {
         await next();
         return;
       }
+      if (cardValue && cardValue.action === "select_repo_for_fix") {
+        await agenticFix.continueFixBugFlow(context, this.sessions.get(convId), cardValue.repoId);
+        await next();
+        return;
+      }
 
       const text = (context.activity.text || "")
         .replace(/<[^>]+>/g, "")
         .toLowerCase()
         .trim();
 
-      const scheduleMatch = text.match(/schedule\s+bug\s+(\d+)/);
+      const scheduleMatch = text.match(/(?:fix|schedule)\s+bug\s+(\d+)/);
       const wantsPR =
         (text.includes("raise pr") ||
           text === "yes" ||
           text.includes("approve")) &&
-        this.sessions.get(convId)?.aiFix;
+        this.sessions.get(convId)?.fixedFiles?.length;
 
       if (
         text.includes("show bugs") ||
@@ -103,7 +100,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
       for (const member of context.activity.membersAdded) {
         if (member.id !== context.activity.recipient.id) {
           await context.sendActivity(
-            "👋 Hi! I'm **StewMate** — Stewart's AI-powered dev assistant!\n\nType `show bugs` to get started.",
+            "👋 Hi! I'm **StewSage** — Stewart's AI-powered dev assistant!\n\nType `show bugs` to see open bugs and user stories, or type `help` to see all commands.",
           );
         }
       }
@@ -116,7 +113,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
       await context.sendActivity({ type: "typing" });
 
       const wiql = {
-        query: `SELECT [System.Id],[System.Title],[System.State],[System.AssignedTo] FROM WorkItems WHERE [System.TeamProject] = '${PROJECT}' AND [System.WorkItemType] = 'Issue' AND [System.State] <> 'Done' AND [System.State] <> 'Closed' ORDER BY [System.CreatedDate] DESC`,
+        query: `SELECT [System.Id],[System.Title],[System.State],[System.AssignedTo],[System.WorkItemType] FROM WorkItems WHERE [System.TeamProject] = '${PROJECT}' AND [System.WorkItemType] IN ('Bug','User Story') AND [System.State] <> 'Done' AND [System.State] <> 'Closed' AND [System.State] <> 'Resolved' ORDER BY [System.WorkItemType] ASC,[System.CreatedDate] DESC`,
       };
 
       let wiqlRes;
@@ -138,7 +135,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
       }
 
       const itemsRes = await axios.get(
-        `${BASE_URL}/wit/workitems?ids=${ids.join(",")}&fields=System.Id,System.Title,System.State,System.AssignedTo&api-version=7.1`,
+        `${BASE_URL}/wit/workitems?ids=${ids.join(",")}&fields=System.Id,System.Title,System.State,System.AssignedTo,System.WorkItemType&api-version=7.1`,
         { headers: HEADERS },
       );
 
@@ -152,70 +149,72 @@ class AzureDevOpsBot extends TeamsActivityHandler {
         body: [
           {
             type: "TextBlock",
-            text: `🐛 Open Issues — ${PROJECT}`,
+            text: `🐛 Open Bugs & User Stories — ${PROJECT}`,
             size: "Large",
             weight: "Bolder",
           },
           {
             type: "TextBlock",
-            text: "Type: schedule bug [number]  to have AI write a fix",
+            text: "Type: fix bug [number]  —  AI will write a code fix for that item",
             isSubtle: true,
             size: "Small",
             spacing: "None",
           },
-          ...bugs.map((bug, i) => ({
-            type: "ColumnSet",
-            separator: true,
-            columns: [
-              {
-                type: "Column",
-                width: "auto",
-                items: [
-                  {
-                    type: "TextBlock",
-                    text: `${i + 1}.`,
-                    weight: "Bolder",
-                    size: "Small",
-                    color: "Accent",
-                  },
-                ],
-              },
-              {
-                type: "Column",
-                width: "stretch",
-                items: [
-                  {
-                    type: "TextBlock",
-                    text: `#${bug.id} · ${bug.fields["System.Title"]}`,
-                    weight: "Bolder",
-                    size: "Small",
-                    wrap: true,
-                  },
-                  {
-                    type: "TextBlock",
-                    text:
-                      bug.fields["System.AssignedTo"]?.displayName ||
-                      "Unassigned",
-                    isSubtle: true,
-                    size: "Small",
-                    spacing: "None",
-                  },
-                ],
-              },
-              {
-                type: "Column",
-                width: "auto",
-                items: [
-                  {
-                    type: "TextBlock",
-                    text: bug.fields["System.State"],
-                    size: "Small",
-                    color: "Attention",
-                  },
-                ],
-              },
-            ],
-          })),
+          ...bugs.map((bug, i) => {
+            const type = bug.fields["System.WorkItemType"];
+            const typeLabel = type === "Bug" ? "🐛 Bug" : "📖 User Story";
+            return {
+              type: "ColumnSet",
+              separator: true,
+              columns: [
+                {
+                  type: "Column",
+                  width: "auto",
+                  items: [
+                    {
+                      type: "TextBlock",
+                      text: `${i + 1}.`,
+                      weight: "Bolder",
+                      size: "Small",
+                      color: "Accent",
+                    },
+                  ],
+                },
+                {
+                  type: "Column",
+                  width: "stretch",
+                  items: [
+                    {
+                      type: "TextBlock",
+                      text: `#${bug.id} · ${bug.fields["System.Title"]}`,
+                      weight: "Bolder",
+                      size: "Small",
+                      wrap: true,
+                    },
+                    {
+                      type: "TextBlock",
+                      text: `${typeLabel} · ${bug.fields["System.AssignedTo"]?.displayName || "Unassigned"}`,
+                      isSubtle: true,
+                      size: "Small",
+                      spacing: "None",
+                    },
+                  ],
+                },
+                {
+                  type: "Column",
+                  width: "auto",
+                  items: [
+                    {
+                      type: "TextBlock",
+                      text: bug.fields["System.State"],
+                      size: "Small",
+                      color: "Attention",
+                    },
+                  ],
+                },
+              ],
+            };
+          }),
         ],
       };
 
@@ -233,23 +232,21 @@ class AzureDevOpsBot extends TeamsActivityHandler {
       const session = this.sessions.get(convId);
 
       if (!session.bugs.length) {
-        await context.sendActivity(
-          "Please type `show bugs` first to load the bug list.",
-        );
+        await context.sendActivity("Please type `show bugs` first to load the bug list.");
         return;
       }
 
       const bug = session.bugs[listNumber - 1];
       if (!bug) {
         await context.sendActivity(
-          `Bug #${listNumber} not found in the list. There are ${session.bugs.length} bugs. Try again.`,
+          `Item #${listNumber} not found. There are ${session.bugs.length} items loaded. Try again.`,
         );
         return;
       }
 
       await context.sendActivity({ type: "typing" });
       await context.sendActivity(
-        `🔍 Fetching full details for **Bug #${bug.id}: ${bug.fields["System.Title"]}**...`,
+        `🔍 Fetching full details for **#${bug.id}: ${bug.fields["System.Title"]}**...`,
       );
 
       const detailRes = await axios.get(
@@ -257,64 +254,35 @@ class AzureDevOpsBot extends TeamsActivityHandler {
         { headers: HEADERS },
       );
       const f = detailRes.data.fields;
-      const title = f["System.Title"] || "";
-      const description = this.stripHtml(
-        f["System.Description"] || "No description provided.",
-      );
-      const reproSteps = this.stripHtml(
-        f["Microsoft.VSTS.TCM.ReproSteps"] || "No repro steps provided.",
-      );
-      const acceptanceCriteria = this.stripHtml(
-        f["Microsoft.VSTS.Common.AcceptanceCriteria"] || "",
-      );
+      const bugDetails = {
+        id: bug.id,
+        title: f["System.Title"] || "",
+        type: f["System.WorkItemType"] || "Bug",
+        description: this.stripHtml(f["System.Description"] || "No description provided."),
+        reproSteps: this.stripHtml(f["Microsoft.VSTS.TCM.ReproSteps"] || ""),
+        acceptanceCriteria: this.stripHtml(f["Microsoft.VSTS.Common.AcceptanceCriteria"] || ""),
+      };
 
-      await context.sendActivity("🤖 Sending to AI — writing code fix now...");
-      await context.sendActivity({ type: "typing" });
-
-      const prompt = `You are a senior software engineer. Analyze this bug and write a production-ready code fix.
-
-Bug ID: ${bug.id}
-Title: ${title}
-Description: ${description}
-Repro Steps: ${reproSteps}
-${acceptanceCriteria ? `Acceptance Criteria: ${acceptanceCriteria}` : ""}
-
-Respond with:
-## Root Cause
-Brief analysis of what's likely causing this bug.
-
-## Code Fix
-Complete, production-ready code with proper file paths and code blocks. Write real code, not pseudocode.
-
-## Test Cases
-Key tests to verify the fix works correctly.`;
-
-      let aiFix;
-      try {
-        const result = await openai.chat.completions.create({
-          model: "gpt-3.5-turbo",
-          max_tokens: 4096,
-          messages: [{ role: "user", content: prompt }],
-        });
-        aiFix = result.choices[0].message.content;
-      } catch (aiErr) {
-        console.warn("AI API unavailable, using demo fix:", aiErr.message);
-        aiFix = this.getDemoFix(title);
-      }
       session.scheduledBug = bug;
-      session.aiFix = aiFix;
+      session.pendingFixBug = bugDetails;
+      // Clear any previous fix state
+      session.fixedFiles = null;
+      session.fixRepo = null;
 
-      const preview =
-        aiFix.length > 3500
-          ? aiFix.substring(0, 3500) +
-            "\n\n_...truncated. Full fix will be in the PR._"
-          : aiFix;
-      await context.sendActivity(
-        `🤖 **AI Fix for Bug #${bug.id}:**\n\n${preview}`,
-      );
-      await context.sendActivity(
-        "---\n✅ Happy with the fix? Type **`raise PR`** to create a PR in ADO.\n❌ Type **`show bugs`** to pick a different bug.",
-      );
+      const reposRes = await axios.get(`${BASE_URL}/git/repositories?api-version=7.1`, { headers: HEADERS });
+      const repos = reposRes.data.value || [];
+      session.repos = repos;
+
+      if (!repos.length) {
+        await context.sendActivity("No repositories found in this project.");
+        return;
+      }
+
+      if (repos.length === 1) {
+        await agenticFix.runAgenticFixFlow(context, session, repos[0], bugDetails);
+      } else {
+        await agenticFix.showRepoSelectorForFix(context, bugDetails, repos);
+      }
     } catch (err) {
       console.error("scheduleBug error:", err.response?.data || err.message);
       await context.sendActivity("Could not analyze bug. Please try again.");
@@ -324,32 +292,21 @@ Key tests to verify the fix works correctly.`;
   async raisePR(context, convId) {
     try {
       const session = this.sessions.get(convId);
-      const { scheduledBug, aiFix } = session;
+      const { scheduledBug, fixedFiles, fixRepo } = session;
 
-      await context.sendActivity({ type: "typing" });
-      await context.sendActivity("📂 Fetching repository info...");
-
-      const reposRes = await axios.get(
-        `${BASE_URL}/git/repositories?api-version=7.1`,
-        { headers: HEADERS },
-      );
-      const repos = reposRes.data.value;
-
-      if (!repos.length) {
-        await context.sendActivity(
-          "No git repositories found in this project!",
-        );
+      if (!fixedFiles?.length || !fixRepo) {
+        await context.sendActivity("No code fix ready. Run `fix bug N` first.");
         return;
       }
 
-      const repo = repos[0];
-      const defaultBranch = repo.defaultBranch || "refs/heads/main";
+      await context.sendActivity({ type: "typing" });
+      await context.sendActivity("📂 Preparing branch and commit...");
 
+      const defaultBranch = fixRepo.defaultBranch || "refs/heads/main";
       const refsRes = await axios.get(
-        `${BASE_URL}/git/repositories/${repo.id}/refs?filter=heads&api-version=7.1`,
+        `${BASE_URL}/git/repositories/${fixRepo.id}/refs?filter=heads&api-version=7.1`,
         { headers: HEADERS },
       );
-
       const mainRef =
         refsRes.data.value.find((r) => r.name === defaultBranch) ||
         refsRes.data.value[0];
@@ -358,54 +315,38 @@ Key tests to verify the fix works correctly.`;
         return;
       }
 
-      const branchName = `ai-fix/bug-${scheduledBug.id}`;
-      const filePath = `/ai-fixes/bug-${scheduledBug.id}-fix.md`;
-      const fileContent = [
-        `# AI Fix: Bug #${scheduledBug.id}`,
-        `**Title:** ${scheduledBug.fields["System.Title"]}`,
-        "",
-        "## AI Generated Fix",
-        "",
-        aiFix,
-        "",
-        "---",
-        "*Generated by StewMate — Stewart AI Dev Assistant*",
-      ].join("\n");
+      const suffix = Date.now().toString(36);
+      const branchName = `ai-fix/bug-${scheduledBug.id}-${suffix}`;
 
       await context.sendActivity(`🌿 Creating branch \`${branchName}\`...`);
 
       await axios.post(
-        `${BASE_URL}/git/repositories/${repo.id}/pushes?api-version=7.1`,
+        `${BASE_URL}/git/repositories/${fixRepo.id}/pushes?api-version=7.1`,
         {
-          refUpdates: [
-            { name: `refs/heads/${branchName}`, oldObjectId: mainRef.objectId },
-          ],
-          commits: [
-            {
-              comment: `AI fix for Bug #${scheduledBug.id}: ${scheduledBug.fields["System.Title"]}`,
-              changes: [
-                {
-                  changeType: "add",
-                  item: { path: filePath },
-                  newContent: {
-                    content: Buffer.from(fileContent).toString("base64"),
-                    contentType: "base64encoded",
-                  },
-                },
-              ],
-            },
-          ],
+          refUpdates: [{ name: `refs/heads/${branchName}`, oldObjectId: mainRef.objectId }],
+          commits: [{
+            comment: `AI fix for Bug #${scheduledBug.id}: ${scheduledBug.fields["System.Title"]}`,
+            changes: fixedFiles.map((f) => ({
+              changeType: "edit",
+              item: { path: f.path },
+              newContent: {
+                content: Buffer.from(f.content).toString("base64"),
+                contentType: "base64encoded",
+              },
+            })),
+          }],
         },
         { headers: HEADERS },
       );
 
       await context.sendActivity("🔀 Creating Pull Request...");
 
+      const fileList = fixedFiles.map((f) => `- \`${f.path}\``).join("\n");
       const prRes = await axios.post(
-        `${BASE_URL}/git/repositories/${repo.id}/pullrequests?api-version=7.1`,
+        `${BASE_URL}/git/repositories/${fixRepo.id}/pullrequests?api-version=7.1`,
         {
           title: `🤖 AI Fix: Bug #${scheduledBug.id} — ${scheduledBug.fields["System.Title"]}`,
-          description: `## AI Generated Fix\n\nThis PR was automatically generated by the Dev Assistant Bot.\n\n**Linked Bug:** #${scheduledBug.id} — ${scheduledBug.fields["System.Title"]}\n\n---\n\n${aiFix}`,
+          description: `## AI Generated Code Fix\n\nThis PR was automatically generated by StewSage.\n\n**Linked Bug:** #${scheduledBug.id} — ${scheduledBug.fields["System.Title"]}\n\n**Files Modified:**\n${fileList}`,
           sourceRefName: `refs/heads/${branchName}`,
           targetRefName: defaultBranch,
           workItemRefs: [{ id: String(scheduledBug.id) }],
@@ -413,15 +354,17 @@ Key tests to verify the fix works correctly.`;
         { headers: HEADERS },
       );
 
-      const prUrl = `https://dev.azure.com/${ORG}/${PROJECT}/_git/${repo.name}/pullrequest/${prRes.data.pullRequestId}`;
+      const prUrl = `https://dev.azure.com/${ORG}/${PROJECT}/_git/${fixRepo.name}/pullrequest/${prRes.data.pullRequestId}`;
       session.scheduledBug = null;
-      session.aiFix = null;
+      session.fixedFiles = null;
+      session.fixRepo = null;
+      session.pendingFixBug = null;
 
       await context.sendActivity(
         `✅ **PR Created Successfully!**\n\n` +
           `🔗 [View PR #${prRes.data.pullRequestId}](${prUrl})\n` +
           `📌 \`${branchName}\` → \`${defaultBranch.replace("refs/heads/", "")}\`\n` +
-          `📁 Repo: **${repo.name}**\n` +
+          `📁 Repo: **${fixRepo.name}**\n` +
           `🐛 Linked to Bug #${scheduledBug.id}`,
       );
     } catch (err) {
@@ -958,12 +901,7 @@ PR_DESCRIPTION:
 
       let prTitle, prDescription;
       try {
-        const result = await openai.chat.completions.create({
-          model: "gpt-3.5-turbo",
-          max_tokens: 2048,
-          messages: [{ role: "user", content: prompt }],
-        });
-        const aiResponse = result.choices[0].message.content;
+        const aiResponse = await generateText(prompt);
 
         const titleMatch = aiResponse.match(/PR_TITLE:\s*(.+)/);
         prTitle = titleMatch
@@ -1017,14 +955,14 @@ PR_DESCRIPTION:
 
   async showHelp(context) {
     await context.sendActivity(
-      "🤖 **StewMate — Your Dev Assistant:**\n\n" +
-        "🐛 `show bugs` — List all open bugs in the project\n" +
-        "🔧 `schedule bug 2` — AI writes a code fix for bug #2 from the list\n" +
-        "🔀 `raise PR` — Select repo & branches, auto-generate description, and create a PR\n" +
-        "📋 `list PRs` — Browse pull requests by repository\n" +
-        "🏃 `sprint status` — Current sprint info\n" +
-        "🚀 `pipeline status` — List pipelines\n" +
-        "📁 `list repos` — List git repositories in the project",
+      "🤖 **StewSage — Your AI Dev Workspace:**\n\n" +
+        "🐛 `show bugs` — List open bugs and user stories from the current sprint\n" +
+        "🔧 `fix bug 2` — AI generates a code fix for bug #2 and offers to raise a PR\n" +
+        "🔀 `raise PR` — Pick repo & branches, AI writes the PR title and description\n" +
+        "📋 `list PRs` — Browse and review pull requests across your repositories\n" +
+        "🏃 `sprint status` — View current sprint name, dates, and progress\n" +
+        "🚀 `pipeline status` — Check CI/CD pipeline health and recent runs\n" +
+        "📁 `list repos` — Browse all repositories in the Azure DevOps project",
     );
   }
 

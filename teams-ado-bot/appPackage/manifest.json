@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
   "manifestVersion": "1.16",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "id": "d6aec572-2dcc-431e-8450-79bc3562c2a6",
   "developer": {
     "name": "Stewart",
@@ -14,8 +14,8 @@
     "full": "StewSage - Stewart AI Dev Assistant"
   },
   "description": {
-    "short": "AI-powered dev assistant for Stewart",
-    "full": "StewSage helps developers view issues, get AI-generated code fixes, and raise PRs all from Teams. Created by Niharika Goel, Stewart."
+    "short": "Your AI-powered dev workspace in Teams",
+    "full": "StewSage is a one-stop AI dev assistant for Stewart engineers. View bugs and user stories, get AI-generated code fixes, raise PRs, check sprint status, and monitor pipelines — all without leaving Teams."
   },
   "icons": {
     "color": "color.png",
@@ -33,33 +33,36 @@
           "scopes": ["personal", "team", "groupchat"],
           "commands": [
             {
-              "title": "show bugs",
-              "description": "List all open issues in the project"
+              "title": "View Work Items",
+              "description": "List open bugs and user stories from the current sprint"
             },
             {
-              "title": "schedule bug 1",
-              "description": "AI writes a code fix for the selected issue"
+              "title": "Fix Bug 1",
+              "description": "Get an AI-generated code fix for bug #1 and optionally raise a PR"
             },
             {
-              "title": "list PRs",
-              "description": "Browse pull requests by repository"
+              "title": "List PRs",
+              "description": "Browse and review pull requests across your repositories"
             },
             {
-              "title": "run pipeline",
-              "description": "Run a selected pipeline"
+              "title": "Raise PR",
+              "description": "Pick repo and branches, AI writes the PR title and description for you"
             },
             {
-              "title": "raise PR",
-              "description": "Select repo & branches, auto-generate description, and create a PR"
+              "title": "Sprint Status",
+              "description": "View current sprint name, dates, and progress at a glance"
             },
             {
-              "title": "sprint status",
-              "description": "Show current sprint info"
+              "title": "Pipeline Status",
+              "description": "Check the health and recent runs of your CI/CD pipelines"
             },
-            { "title": "pipeline status", "description": "List pipelines" },
             {
-              "title": "list repos",
-              "description": "List all repos in the project"
+              "title": "Run Pipeline",
+              "description": "Trigger a pipeline run directly from the chat"
+            },
+            {
+              "title": "List Repos",
+              "description": "Browse all repositories in the Azure DevOps project"
             }
           ]
         }
