@@ -5,8 +5,10 @@ const {
 } = require("botbuilder");
 const axios = require("axios");
 const { ORG, PROJECT, BASE_URL, HEADERS } = require("./adoConfig");
+const { generateText } = require("./aiProvider");
 const agenticFix = require("./agenticFix");
 const pipelineCmd = require("./pipelineCommands");
+const intentParser = require("./intentParser");
 
 
 class AzureDevOpsBot extends TeamsActivityHandler {
@@ -19,7 +21,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
 
       if (!this.sessions.has(convId)) {
         this.sessions.set(convId, {
-          bugs: [],
+          workItems: [],
           scheduledBug: null,
           aiFix: null,
           fixedFiles: null,
@@ -76,35 +78,40 @@ class AzureDevOpsBot extends TeamsActivityHandler {
 
       const text = (context.activity.text || "")
         .replace(/<[^>]+>/g, "")
-        .toLowerCase()
         .trim();
 
-      const scheduleMatch = text.match(/(?:fix|schedule)\s+bug\s+(\d+)/);
+      await context.sendActivity({ type: "typing" });
 
-      if (
-        text.includes("show bugs") ||
-        text.includes("list bugs") ||
-        text === "bugs"
-      ) {
-        await this.showBugs(context, convId);
-      } else if (scheduleMatch) {
-        await this.scheduleBug(context, convId, parseInt(scheduleMatch[1]));
-      } else if (text.includes("raise pr") || text.includes("create pr")) {
-        await this.showRepoSelectorForPR(context, convId);
-      } else if (text.includes("list pr") || text.includes("show pr") || text === "prs") {
-        await this.showRepoSelector(context, convId);
-      } else if (text.includes("sprint")) {
-        await this.showSprint(context);
-      } else if (text.includes("run pipeline") || text.includes("trigger pipeline") || text.includes("run build")) {
-        await pipelineCmd.showRepoSelectorForPipeline(context, this.sessions.get(convId), "run");
-      } else if (text.includes("pipeline log") || text.includes("build log") || text.includes("failed log") || text.includes("failure log")) {
-        await pipelineCmd.showRepoSelectorForPipeline(context, this.sessions.get(convId), "logs");
-      } else if (text.includes("pipeline run") || text.includes("pipeline status") || text.includes("build status") || text.includes("pipeline") || text.includes("build")) {
-        await pipelineCmd.showRepoSelectorForPipeline(context, this.sessions.get(convId), "status");
-      } else if (text.includes("repo")) {
-        await this.showRepos(context);
+      const parsed = await intentParser.parseIntent(text);
+
+      if (parsed) {
+        await this.dispatch(context, convId, parsed);
       } else {
-        await this.showHelp(context);
+        // Fallback regex routing when AI parser is unavailable
+        console.warn("[bot] AI intent parser unavailable — using regex fallback");
+        const ltext = text.toLowerCase();
+        const scheduleMatch = ltext.match(/(?:fix|schedule)\s+bug\s+(\d+)/);
+        if (scheduleMatch) {
+          await this.scheduleBug(context, convId, parseInt(scheduleMatch[1]));
+        } else if (ltext.includes("show bugs") || ltext.includes("list bugs") || ltext === "bugs") {
+          await this.showWorkItems(context, convId, ["Bug", "User Story"]);
+        } else if (ltext.includes("raise pr") || ltext.includes("create pr")) {
+          await this.showRepoSelectorForPR(context, convId);
+        } else if (ltext.includes("list pr") || ltext.includes("show pr") || ltext === "prs") {
+          await this.showRepoSelector(context, convId);
+        } else if (ltext.includes("sprint")) {
+          await this.showSprint(context);
+        } else if (ltext.includes("run pipeline") || ltext.includes("trigger pipeline") || ltext.includes("run build")) {
+          await pipelineCmd.showRepoSelectorForPipeline(context, this.sessions.get(convId), "run");
+        } else if (ltext.includes("pipeline log") || ltext.includes("build log") || ltext.includes("failed log") || ltext.includes("failure log")) {
+          await pipelineCmd.showRepoSelectorForPipeline(context, this.sessions.get(convId), "logs");
+        } else if (ltext.includes("pipeline") || ltext.includes("build")) {
+          await pipelineCmd.showRepoSelectorForPipeline(context, this.sessions.get(convId), "status");
+        } else if (ltext.includes("repo")) {
+          await this.showRepos(context);
+        } else {
+          await this.showHelp(context);
+        }
       }
 
       await next();
@@ -122,12 +129,52 @@ class AzureDevOpsBot extends TeamsActivityHandler {
     });
   }
 
-  async showBugs(context, convId) {
+  async dispatch(context, convId, { intent, params = {} }) {
+    const session = this.sessions.get(convId);
+    switch (intent) {
+      case "show_work_items": {
+        const types = Array.isArray(params.types) && params.types.length
+          ? params.types
+          : ["Bug", "User Story"];
+        await this.showWorkItems(context, convId, types);
+        break;
+      }
+      case "fix_bug":
+        await this.scheduleBug(context, convId, params.bugNumber || 1);
+        break;
+      case "raise_pr":
+        await this.showRepoSelectorForPR(context, convId);
+        break;
+      case "list_prs":
+        await this.showRepoSelector(context, convId);
+        break;
+      case "sprint_status":
+        await this.showSprint(context);
+        break;
+      case "run_pipeline":
+        await pipelineCmd.showRepoSelectorForPipeline(context, session, "run");
+        break;
+      case "pipeline_logs":
+        await pipelineCmd.showRepoSelectorForPipeline(context, session, "logs");
+        break;
+      case "pipeline_status":
+        await pipelineCmd.showRepoSelectorForPipeline(context, session, "status");
+        break;
+      case "list_repos":
+        await this.showRepos(context);
+        break;
+      default:
+        await this.showHelp(context);
+    }
+  }
+
+  async showWorkItems(context, convId, types) {
     try {
       await context.sendActivity({ type: "typing" });
 
+      const typeList = types.map((t) => `'${t}'`).join(",");
       const wiql = {
-        query: `SELECT [System.Id],[System.Title],[System.State],[System.AssignedTo],[System.WorkItemType] FROM WorkItems WHERE [System.TeamProject] = '${PROJECT}' AND [System.WorkItemType] IN ('Bug','User Story') AND [System.State] <> 'Done' AND [System.State] <> 'Closed' AND [System.State] <> 'Resolved' ORDER BY [System.WorkItemType] ASC,[System.CreatedDate] DESC`,
+        query: `SELECT [System.Id],[System.Title],[System.State],[System.AssignedTo],[System.WorkItemType] FROM WorkItems WHERE [System.TeamProject] = '${PROJECT}' AND [System.WorkItemType] IN (${typeList}) AND [System.State] <> 'Done' AND [System.State] <> 'Closed' AND [System.State] <> 'Resolved' ORDER BY [System.WorkItemType] ASC,[System.CreatedDate] DESC`,
       };
 
       let wiqlRes;
@@ -144,7 +191,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
       const ids = (wiqlRes.data.workItems || []).slice(0, 10).map((w) => w.id);
 
       if (!ids.length) {
-        await context.sendActivity("No open bugs found in the project!");
+        await context.sendActivity(`No open ${types.join(" / ")} found in the project!`);
         return;
       }
 
@@ -153,8 +200,19 @@ class AzureDevOpsBot extends TeamsActivityHandler {
         { headers: HEADERS },
       );
 
-      const bugs = itemsRes.data.value;
-      this.sessions.get(convId).bugs = bugs;
+      const workItems = itemsRes.data.value;
+      this.sessions.get(convId).workItems = workItems;
+
+      const TYPE_LABEL = {
+        "Bug": "🐛 Bug",
+        "User Story": "📖 User Story",
+        "Task": "✅ Task",
+        "Feature": "⭐ Feature",
+        "Epic": "🚀 Epic",
+      };
+      const cardTitle = types.length >= 5
+        ? `🗂️ All Work Items — ${PROJECT}`
+        : `${types.map((t) => TYPE_LABEL[t] || t).join(" & ")} — ${PROJECT}`;
 
       const card = {
         $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -163,7 +221,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
         body: [
           {
             type: "TextBlock",
-            text: `🐛 Open Bugs & User Stories — ${PROJECT}`,
+            text: cardTitle,
             size: "Large",
             weight: "Bolder",
           },
@@ -174,9 +232,9 @@ class AzureDevOpsBot extends TeamsActivityHandler {
             size: "Small",
             spacing: "None",
           },
-          ...bugs.map((bug, i) => {
+          ...workItems.map((bug, i) => {
             const type = bug.fields["System.WorkItemType"];
-            const typeLabel = type === "Bug" ? "🐛 Bug" : "📖 User Story";
+            const typeLabel = TYPE_LABEL[type] || type;
             return {
               type: "ColumnSet",
               separator: true,
@@ -245,15 +303,15 @@ class AzureDevOpsBot extends TeamsActivityHandler {
     try {
       const session = this.sessions.get(convId);
 
-      if (!session.bugs.length) {
-        await context.sendActivity("Please type `show bugs` first to load the bug list.");
+      if (!session.workItems.length) {
+        await context.sendActivity("Please show work items first (e.g. `show bugs`) to load the list.");
         return;
       }
 
-      const bug = session.bugs[listNumber - 1];
+      const bug = session.workItems[listNumber - 1];
       if (!bug) {
         await context.sendActivity(
-          `Item #${listNumber} not found. There are ${session.bugs.length} items loaded. Try again.`,
+          `Item #${listNumber} not found. There are ${session.workItems.length} items loaded. Try again.`,
         );
         return;
       }
