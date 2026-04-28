@@ -94,7 +94,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
         if (scheduleMatch) {
           await this.scheduleBug(context, convId, parseInt(scheduleMatch[1]));
         } else if (ltext.includes("show bugs") || ltext.includes("list bugs") || ltext === "bugs") {
-          await this.showWorkItems(context, convId, ["Bug", "User Story"]);
+          await this.showWorkItems(context, convId, ["Bug"]);
         } else if (ltext.includes("raise pr") || ltext.includes("create pr")) {
           await this.showRepoSelectorForPR(context, convId);
         } else if (ltext.includes("list pr") || ltext.includes("show pr") || ltext === "prs") {
