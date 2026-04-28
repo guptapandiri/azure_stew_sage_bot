@@ -54,11 +54,15 @@
             },
             {
               "title": "Pipeline Status",
-              "description": "Check the health and recent runs of your CI/CD pipelines"
+              "description": "Select a repo and pipeline to view recent runs with results and duration"
             },
             {
               "title": "Run Pipeline",
-              "description": "Trigger a pipeline run directly from the chat"
+              "description": "Select repo → pipeline → branch, then trigger a build directly from chat"
+            },
+            {
+              "title": "Pipeline Logs",
+              "description": "Fetch failed pipeline logs with AI-powered root cause diagnosis"
             },
             {
               "title": "List Repos",

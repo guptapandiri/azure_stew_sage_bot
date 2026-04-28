@@ -6,6 +6,7 @@ const {
 const axios = require("axios");
 const { ORG, PROJECT, BASE_URL, HEADERS } = require("./adoConfig");
 const agenticFix = require("./agenticFix");
+const pipelineCmd = require("./pipelineCommands");
 
 
 class AzureDevOpsBot extends TeamsActivityHandler {
@@ -26,6 +27,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
           pendingFixBug: null,
           repos: [],
           prFlow: {},
+          pipelineFlow: {},
         });
       }
 
@@ -53,6 +55,21 @@ class AzureDevOpsBot extends TeamsActivityHandler {
       }
       if (cardValue && cardValue.action === "select_repo_for_fix") {
         await agenticFix.continueFixBugFlow(context, this.sessions.get(convId), cardValue.repoId);
+        await next();
+        return;
+      }
+      if (cardValue && cardValue.action === "pipeline_select_repo") {
+        await pipelineCmd.showPipelinesForRepo(context, this.sessions.get(convId), cardValue.repoId, cardValue.intent);
+        await next();
+        return;
+      }
+      if (cardValue && cardValue.action === "pipeline_select_pipeline") {
+        await pipelineCmd.handlePipelineSelected(context, this.sessions.get(convId), cardValue.pipelineId);
+        await next();
+        return;
+      }
+      if (cardValue && cardValue.action === "pipeline_run") {
+        await pipelineCmd.triggerPipelineRun(context, this.sessions.get(convId), cardValue.branch);
         await next();
         return;
       }
@@ -85,8 +102,12 @@ class AzureDevOpsBot extends TeamsActivityHandler {
         await this.showRepoSelector(context, convId);
       } else if (text.includes("sprint")) {
         await this.showSprint(context);
-      } else if (text.includes("pipeline") || text.includes("build")) {
-        await this.showPipelines(context);
+      } else if (text.includes("run pipeline") || text.includes("trigger pipeline") || text.includes("run build")) {
+        await pipelineCmd.showRepoSelectorForPipeline(context, this.sessions.get(convId), "run");
+      } else if (text.includes("pipeline log") || text.includes("build log") || text.includes("failed log") || text.includes("failure log")) {
+        await pipelineCmd.showRepoSelectorForPipeline(context, this.sessions.get(convId), "logs");
+      } else if (text.includes("pipeline run") || text.includes("pipeline status") || text.includes("build status") || text.includes("pipeline") || text.includes("build")) {
+        await pipelineCmd.showRepoSelectorForPipeline(context, this.sessions.get(convId), "status");
       } else if (text.includes("repo")) {
         await this.showRepos(context);
       } else {
@@ -396,28 +417,6 @@ class AzureDevOpsBot extends TeamsActivityHandler {
     } catch (err) {
       console.error(err.response?.data || err.message);
       await context.sendActivity("Could not fetch sprint info.");
-    }
-  }
-
-  async showPipelines(context) {
-    try {
-      await context.sendActivity({ type: "typing" });
-      const res = await axios.get(`${BASE_URL}/pipelines?api-version=7.1`, {
-        headers: HEADERS,
-      });
-      const pipelines = res.data.value?.slice(0, 5);
-      if (!pipelines?.length) {
-        await context.sendActivity("No pipelines found!");
-        return;
-      }
-      let msg = "🚀 **Pipelines:**\n\n";
-      for (const p of pipelines) {
-        msg += `• **${p.name}**\n`;
-      }
-      await context.sendActivity(msg);
-    } catch (err) {
-      console.error(err.response?.data || err.message);
-      await context.sendActivity("Could not fetch pipelines.");
     }
   }
 
@@ -961,7 +960,9 @@ PR_DESCRIPTION:
         "🔀 `raise PR` — Pick repo & branches, AI writes the PR title and description\n" +
         "📋 `list PRs` — Browse and review pull requests across your repositories\n" +
         "🏃 `sprint status` — View current sprint name, dates, and progress\n" +
-        "🚀 `pipeline status` — Check CI/CD pipeline health and recent runs\n" +
+        "🚀 `run pipeline` — Select repo → pipeline → branch, then trigger a build\n" +
+        "📊 `pipeline status` — View recent runs for a pipeline with results and duration\n" +
+        "📋 `pipeline logs` — Fetch failed run logs with AI-powered root cause analysis\n" +
         "📁 `list repos` — Browse all repositories in the Azure DevOps project",
     );
   }
