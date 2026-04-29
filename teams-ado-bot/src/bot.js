@@ -10,6 +10,7 @@ const { generateText } = require("./aiProvider");
 const agenticFix = require("./agenticFix");
 const pipelineCmd = require("./pipelineCommands");
 const intentParser = require("./intentParser");
+const workItemActions = require("./workItemActions");
 
 
 class AzureDevOpsBot extends TeamsActivityHandler {
@@ -45,7 +46,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
       // Handle Adaptive Card submit actions (e.g. repo selector for PR list)
       const cardValue = context.activity.value;
       if (cardValue && cardValue.action === "select_repo") {
-        await this.showPRsForRepo(context, convId, cardValue.repoId);
+        await this.showPRsForRepo(context, convId, cardValue.repoId, cardValue.status || "active", cardValue.assignedTo || null);
         await next();
         return;
       }
@@ -156,7 +157,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
         const types = Array.isArray(params.types) && params.types.length
           ? params.types
           : ["Bug", "User Story"];
-        await this.showWorkItems(context, convId, types);
+        await this.showWorkItems(context, convId, types, params.assignedTo || null);
         break;
       }
       case "fix_bug":
@@ -166,7 +167,7 @@ class AzureDevOpsBot extends TeamsActivityHandler {
         await this.showRepoSelectorForPR(context, convId);
         break;
       case "list_prs":
-        await this.showRepoSelector(context, convId);
+        await this.showRepoSelector(context, convId, params.status || "active", params.assignedTo || null);
         break;
       case "sprint_status":
         await this.showSprint(context);
@@ -182,6 +183,15 @@ class AzureDevOpsBot extends TeamsActivityHandler {
         break;
       case "list_repos":
         await this.showRepos(context);
+        break;
+      case "assign_work_item":
+        await workItemActions.assignWorkItem(context, session, params.itemNumber || 1, params.assignTo || "me");
+        break;
+      case "update_work_item_status":
+        await workItemActions.updateWorkItemStatus(context, session, params.itemNumber || 1, params.status || "Active");
+        break;
+      case "add_comment":
+        await workItemActions.addWorkItemComment(context, session, params.itemNumber || 1, params.comment || "");
         break;
       case "chat":
         await this.handleChat(context, originalText);
@@ -208,13 +218,21 @@ ${text}`;
     }
   }
 
-  async showWorkItems(context, convId, types) {
+  async showWorkItems(context, convId, types, assignedTo = null) {
     try {
       await context.sendActivity({ type: "typing" });
 
       const typeList = types.map((t) => `'${t}'`).join(",");
+      let assigneeClause = "";
+      if (assignedTo) {
+        const name = assignedTo === "me"
+          ? context.activity.from.name
+          : assignedTo;
+        const safe = name.replace(/'/g, "''");
+        assigneeClause = ` AND [System.AssignedTo] Contains '${safe}'`;
+      }
       const wiql = {
-        query: `SELECT [System.Id],[System.Title],[System.State],[System.AssignedTo],[System.WorkItemType] FROM WorkItems WHERE [System.TeamProject] = '${PROJECT}' AND [System.WorkItemType] IN (${typeList}) AND [System.State] <> 'Done' AND [System.State] <> 'Closed' AND [System.State] <> 'Resolved' ORDER BY [System.WorkItemType] ASC,[System.CreatedDate] DESC`,
+        query: `SELECT [System.Id],[System.Title],[System.State],[System.AssignedTo],[System.WorkItemType] FROM WorkItems WHERE [System.TeamProject] = '${PROJECT}' AND [System.WorkItemType] IN (${typeList}) AND [System.State] <> 'Done' AND [System.State] <> 'Closed' AND [System.State] <> 'Resolved'${assigneeClause} ORDER BY [System.WorkItemType] ASC,[System.CreatedDate] DESC`,
       };
 
       let wiqlRes;
@@ -231,7 +249,10 @@ ${text}`;
       const ids = (wiqlRes.data.workItems || []).slice(0, 10).map((w) => w.id);
 
       if (!ids.length) {
-        await context.sendActivity(`No open ${types.join(" / ")} found in the project!`);
+        const who = assignedTo
+          ? ` assigned to ${assignedTo === "me" ? "you" : assignedTo}`
+          : "";
+        await context.sendActivity(`No open ${types.join(" / ")}${who} found in the project!`);
         return;
       }
 
@@ -450,7 +471,7 @@ ${text}`;
     }
   }
 
-  async showRepoSelector(context, convId) {
+  async showRepoSelector(context, convId, status = "active", assignedTo = null) {
     try {
       await context.sendActivity({ type: "typing" });
 
@@ -465,8 +486,12 @@ ${text}`;
         return;
       }
 
-      // Cache repos in session for later lookup
       this.sessions.get(convId).repos = repos;
+
+      const statusLabel = status === "all" ? "All" : status.charAt(0).toUpperCase() + status.slice(1);
+      const filterNote = assignedTo
+        ? ` · ${assignedTo === "me" ? "yours" : assignedTo + "'s"}`
+        : "";
 
       const card = {
         $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -475,7 +500,7 @@ ${text}`;
         body: [
           {
             type: "TextBlock",
-            text: "🔀 List Pull Requests",
+            text: `🔀 List Pull Requests — ${statusLabel}${filterNote}`,
             size: "Large",
             weight: "Bolder",
           },
@@ -497,7 +522,7 @@ ${text}`;
           {
             type: "Action.Submit",
             title: "View PRs",
-            data: { action: "select_repo" },
+            data: { action: "select_repo", status, assignedTo },
           },
         ],
       };
@@ -514,7 +539,7 @@ ${text}`;
     }
   }
 
-  async showPRsForRepo(context, convId, repoId) {
+  async showPRsForRepo(context, convId, repoId, status = "active", assignedTo = null) {
     try {
       await context.sendActivity({ type: "typing" });
 
@@ -523,14 +548,26 @@ ${text}`;
       const repoName = repo?.name || repoId;
 
       const res = await axios.get(
-        `${BASE_URL}/git/repositories/${repoId}/pullrequests?searchCriteria.status=all&$top=20&api-version=7.1`,
+        `${BASE_URL}/git/repositories/${repoId}/pullrequests?searchCriteria.status=${status}&$top=50&api-version=7.1`,
         { headers: HEADERS },
       );
-      const prs = res.data.value;
+      let prs = res.data.value || [];
 
-      if (!prs?.length) {
+      // Client-side filter by creator or reviewer name
+      if (assignedTo) {
+        const needle = assignedTo === "me"
+          ? context.activity.from.name.toLowerCase()
+          : assignedTo.toLowerCase();
+        prs = prs.filter((pr) =>
+          pr.createdBy?.displayName?.toLowerCase().includes(needle) ||
+          (pr.reviewers || []).some((r) => r.displayName?.toLowerCase().includes(needle)),
+        );
+      }
+
+      if (!prs.length) {
+        const who = assignedTo ? ` for ${assignedTo === "me" ? "you" : assignedTo}` : "";
         await context.sendActivity(
-          `No pull requests found for **${repoName}**.`,
+          `No ${status === "all" ? "" : status + " "}pull requests found for **${repoName}**${who}.`,
         );
         return;
       }
@@ -555,7 +592,7 @@ ${text}`;
           },
           {
             type: "TextBlock",
-            text: `Showing ${prs.length} most recent PR(s)`,
+            text: `${prs.length} ${status === "all" ? "" : status + " "}PR(s)${assignedTo ? " · " + (assignedTo === "me" ? "yours" : assignedTo) : ""}`,
             isSubtle: true,
             size: "Small",
             spacing: "None",
@@ -957,15 +994,23 @@ PR_DESCRIPTION:
   async showHelp(context) {
     await context.sendActivity(
       "🤖 **StewSage — Your AI Dev Workspace:**\n\n" +
-        "🐛 `show bugs` — List open bugs and user stories from the current sprint\n" +
+        "🐛 `show bugs` — List open bugs and user stories\n" +
+        "🐛 `show my bugs` — Filter by assigned to you\n" +
+        "🐛 `show tasks assigned to John` — Filter by any team member\n" +
         "🔧 `fix bug 2` — AI scans the repo, generates a code fix, and raises a PR automatically\n" +
+        "📌 `assign item 2 to me` — Reassign a work item\n" +
+        "🔄 `mark item 1 as Active` — Update work item status\n" +
+        "💬 `add comment to item 3: looks good` — Comment on a work item\n" +
         "🔀 `raise PR` — Pick repo & branches, AI writes the PR title and description\n" +
-        "📋 `list PRs` — Browse and review pull requests across your repositories\n" +
-        "🏃 `sprint status` — View current sprint name, dates, and progress\n" +
+        "📋 `list PRs` — Browse active pull requests\n" +
+        "📋 `show my PRs` — PRs you created or are reviewing\n" +
+        "📋 `show all PRs` / `show completed PRs` — Filter by status\n" +
+        "🏃 `sprint status` — View current sprint name and dates\n" +
         "🚀 `run pipeline` — Select repo → pipeline → branch, then trigger a build\n" +
-        "📊 `pipeline status` — View recent runs for a pipeline with results and duration\n" +
-        "📋 `pipeline logs` — Fetch failed run logs with AI-powered root cause analysis\n" +
-        "📁 `list repos` — Browse all repositories in the Azure DevOps project",
+        "📊 `pipeline status` — View recent runs for a pipeline\n" +
+        "📋 `pipeline logs` — Fetch failed run logs with AI root cause analysis\n" +
+        "📁 `list repos` — Browse all repositories\n" +
+        "💡 Or just ask me anything — I can answer code questions too!",
     );
   }
 
