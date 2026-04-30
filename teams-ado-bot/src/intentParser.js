@@ -18,6 +18,7 @@ Available intents:
 - "assign_work_item": Assign a work item to someone. params: { itemNumber: number, assignTo: string } — itemNumber is the list position shown in the last work item card; assignTo is "me" or the person's name.
 - "update_work_item_status": Change the status/state of a work item. params: { itemNumber: number, status: string } — status should be the exact state the user wants (e.g. "Active", "Resolved", "Done", "In Progress").
 - "add_comment": Add a comment to a work item. params: { itemNumber: number, comment: string }
+- "user_summary": Show a summary of open work items and active PRs for a user. params: { name: string } — use "me" if the user asks about themselves ("tell me about me", "my summary", "what do I have"), otherwise the person's name.
 - "chat": Any general question, coding help, debugging, explanation, architecture advice, or open-ended conversation not covered by the commands above. params: {}
 - "help": User explicitly asks for help or a list of commands. params: {}
 
@@ -61,6 +62,13 @@ Examples:
 "build logs" → {"intent":"pipeline_logs","params":{}}
 "pipeline status" → {"intent":"pipeline_status","params":{}}
 "list repos" → {"intent":"list_repos","params":{}}
+"tell me about me" → {"intent":"user_summary","params":{"name":"me"}}
+"show my summary" → {"intent":"user_summary","params":{"name":"me"}}
+"what do I have" → {"intent":"user_summary","params":{"name":"me"}}
+"my overview" → {"intent":"user_summary","params":{"name":"me"}}
+"tell me about John" → {"intent":"user_summary","params":{"name":"John"}}
+"show summary for Pratik" → {"intent":"user_summary","params":{"name":"Pratik"}}
+"what is Sarah working on" → {"intent":"user_summary","params":{"name":"Sarah"}}
 "help" → {"intent":"help","params":{}}
 
 Respond with ONLY a JSON object, no markdown, no explanation.

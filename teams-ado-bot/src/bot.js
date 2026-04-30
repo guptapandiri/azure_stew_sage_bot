@@ -193,6 +193,9 @@ class AzureDevOpsBot extends TeamsActivityHandler {
       case "add_comment":
         await workItemActions.addWorkItemComment(context, session, params.itemNumber || 1, params.comment || "");
         break;
+      case "user_summary":
+        await this.showUserSummary(context, params.name || "me");
+        break;
       case "chat":
         await this.handleChat(context, originalText);
         break;
@@ -1000,6 +1003,134 @@ PR_DESCRIPTION:
     }
   }
 
+  async showUserSummary(context, name) {
+    const displayName = name === "me" ? context.activity.from.name : name;
+    const safe = displayName.replace(/'/g, "''");
+
+    await context.sendActivity({ type: "typing" });
+    await context.sendActivity(`🔍 Pulling up summary for **${displayName}**...`);
+
+    const TYPE_EMOJI = { Bug: "🐛", "User Story": "📖", Task: "✅", Feature: "⭐", Epic: "🚀" };
+
+    // Work items assigned to user
+    let workItems = [];
+    try {
+      const wiqlRes = await axios.post(
+        `${BASE_URL}/wit/wiql?api-version=7.1`,
+        {
+          query: `SELECT [System.Id],[System.Title],[System.State],[System.WorkItemType] FROM WorkItems WHERE [System.TeamProject] = '${PROJECT}' AND [System.AssignedTo] Contains '${safe}' AND [System.State] <> 'Done' AND [System.State] <> 'Closed' AND [System.State] <> 'Resolved' ORDER BY [System.WorkItemType] ASC,[System.CreatedDate] DESC`,
+        },
+        { headers: HEADERS },
+      );
+      const ids = (wiqlRes.data.workItems || []).slice(0, 15).map((w) => w.id);
+      if (ids.length) {
+        const itemsRes = await axios.get(
+          `${BASE_URL}/wit/workitems?ids=${ids.join(",")}&fields=System.Id,System.Title,System.State,System.WorkItemType&api-version=7.1`,
+          { headers: HEADERS },
+        );
+        workItems = itemsRes.data.value || [];
+      }
+    } catch (err) {
+      console.error("[showUserSummary] work items error:", err.response?.data || err.message);
+    }
+
+    // Active PRs across all repos
+    let prs = [];
+    try {
+      const reposRes = await axios.get(`${BASE_URL}/git/repositories?api-version=7.1`, { headers: HEADERS });
+      const repos = reposRes.data.value || [];
+      const needle = displayName.toLowerCase();
+      for (const repo of repos) {
+        const prRes = await axios.get(
+          `${BASE_URL}/git/repositories/${repo.id}/pullrequests?searchCriteria.status=active&$top=50&api-version=7.1`,
+          { headers: HEADERS },
+        );
+        const matched = (prRes.data.value || [])
+          .filter((pr) =>
+            pr.createdBy?.displayName?.toLowerCase().includes(needle) ||
+            (pr.reviewers || []).some((r) => r.displayName?.toLowerCase().includes(needle)),
+          )
+          .map((pr) => ({ ...pr, repoName: repo.name }));
+        prs.push(...matched);
+      }
+    } catch (err) {
+      console.error("[showUserSummary] PRs error:", err.response?.data || err.message);
+    }
+
+    // Build card body
+    const body = [
+      { type: "TextBlock", text: `👤 ${displayName}`, size: "Large", weight: "Bolder" },
+      { type: "TextBlock", text: `${PROJECT} · Open work items & active PRs`, isSubtle: true, size: "Small", spacing: "None" },
+    ];
+
+    // Work items section
+    body.push({
+      type: "TextBlock",
+      text: workItems.length ? `📋 Open Work Items (${workItems.length})` : "📋 Open Work Items",
+      weight: "Bolder", size: "Small", spacing: "Large", color: "Accent",
+    });
+    if (workItems.length) {
+      body.push(...workItems.map((item) => ({
+        type: "ColumnSet",
+        separator: true,
+        columns: [
+          {
+            type: "Column", width: "stretch",
+            items: [{
+              type: "TextBlock",
+              text: `${TYPE_EMOJI[item.fields["System.WorkItemType"]] || "•"} #${item.id} · ${item.fields["System.Title"]}`,
+              size: "Small", wrap: true,
+            }],
+          },
+          {
+            type: "Column", width: "auto",
+            items: [{ type: "TextBlock", text: item.fields["System.State"], size: "Small", color: "Attention" }],
+          },
+        ],
+      })));
+    } else {
+      body.push({ type: "TextBlock", text: `No open work items assigned to ${displayName}.`, isSubtle: true, size: "Small" });
+    }
+
+    // PRs section
+    body.push({
+      type: "TextBlock",
+      text: prs.length ? `🔀 Active Pull Requests (${prs.length})` : "🔀 Active Pull Requests",
+      weight: "Bolder", size: "Small", spacing: "Large", color: "Accent",
+    });
+    if (prs.length) {
+      body.push(...prs.slice(0, 5).map((pr) => {
+        const src = pr.sourceRefName.replace("refs/heads/", "");
+        const prUrl = `https://dev.azure.com/${ORG}/${PROJECT}/_git/${pr.repoName}/pullrequest/${pr.pullRequestId}`;
+        return {
+          type: "ColumnSet",
+          separator: true,
+          selectAction: { type: "Action.OpenUrl", url: prUrl },
+          columns: [
+            {
+              type: "Column", width: "stretch",
+              items: [
+                { type: "TextBlock", text: `#${pr.pullRequestId} · ${pr.title}`, size: "Small", wrap: true, weight: "Bolder" },
+                { type: "TextBlock", text: `${pr.repoName} · \`${src}\``, size: "Small", isSubtle: true, spacing: "None" },
+              ],
+            },
+          ],
+        };
+      }));
+    } else {
+      body.push({ type: "TextBlock", text: `No active PRs for ${displayName}.`, isSubtle: true, size: "Small" });
+    }
+
+    await context.sendActivity(
+      MessageFactory.attachment(CardFactory.adaptiveCard({
+        $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+        type: "AdaptiveCard",
+        version: "1.5",
+        body,
+      })),
+    );
+  }
+
   async showHelp(context) {
     const section = (emoji, title, commands) => ({
       type: "Container",
@@ -1054,6 +1185,10 @@ PR_DESCRIPTION:
           ["show my bugs", "Filter by assigned to you"],
           ["show tasks assigned to John", "Filter by any team member"],
           ["show everything", "All work items across all types"],
+        ]),
+        section("👤", "User Summary", [
+          ["tell me about me", "Your open work items + active PRs at a glance"],
+          ["show summary for John", "Same view for any team member"],
         ]),
         section("🔧", "AI Bug Fix", [
           ["fix bug #25", "AI scans the repo, writes the code fix, and raises a PR — fully automatic"],
