@@ -288,7 +288,7 @@ ${text}`;
           },
           {
             type: "TextBlock",
-            text: "Type: fix bug [number]  —  AI will write a code fix for that item",
+            text: "Type: fix bug #ID  —  AI will write a code fix for that item",
             isSubtle: true,
             size: "Small",
             spacing: "None",
@@ -306,7 +306,7 @@ ${text}`;
                   items: [
                     {
                       type: "TextBlock",
-                      text: `${i + 1}. #${bug.id} · ${bug.fields["System.Title"]}`,
+                      text: `#${bug.id} · ${bug.fields["System.Title"]}`,
                       weight: "Bolder",
                       size: "Small",
                       wrap: true,
