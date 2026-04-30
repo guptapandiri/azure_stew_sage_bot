@@ -45,26 +45,45 @@ class AzureDevOpsBot extends TeamsActivityHandler {
 
       // Handle Adaptive Card submit actions (e.g. repo selector for PR list)
       const cardValue = context.activity.value;
-      if (cardValue && cardValue.action) {
-        const session = this.sessions.get(convId);
-        // Fire and forget all card actions — lets Teams get an immediate 200
-        // response so it never shows "Something went wrong" on long operations.
-        const cardHandlers = {
-          select_repo: () => this.showPRsForRepo(context, convId, cardValue.repoId, cardValue.status || "active", cardValue.assignedTo || null),
-          select_repo_for_pr: () => this.showSourceBranchSelector(context, convId, cardValue.repoId),
-          select_source_branch: () => this.showTargetBranchSelector(context, convId, cardValue.sourceBranch),
-          select_target_branch: () => this.createPRFromBranches(context, convId, cardValue.targetBranch),
-          select_repo_for_fix: () => agenticFix.continueFixBugFlow(context, session, cardValue.repoId),
-          pipeline_select_repo: () => pipelineCmd.showPipelinesForRepo(context, session, cardValue.repoId, cardValue.intent),
-          pipeline_select_pipeline: () => pipelineCmd.handlePipelineSelected(context, session, cardValue.pipelineId),
-          pipeline_run: () => pipelineCmd.triggerPipelineRun(context, session, cardValue.branch),
-        };
-        const handler = cardHandlers[cardValue.action];
-        if (handler) {
-          handler().catch((err) => console.error(`[bot] card action "${cardValue.action}" error:`, err.message));
-          await next();
-          return;
-        }
+      if (cardValue && cardValue.action === "select_repo") {
+        await this.showPRsForRepo(context, convId, cardValue.repoId, cardValue.status || "active", cardValue.assignedTo || null);
+        await next();
+        return;
+      }
+      if (cardValue && cardValue.action === "select_repo_for_pr") {
+        await this.showSourceBranchSelector(context, convId, cardValue.repoId);
+        await next();
+        return;
+      }
+      if (cardValue && cardValue.action === "select_source_branch") {
+        await this.showTargetBranchSelector(context, convId, cardValue.sourceBranch);
+        await next();
+        return;
+      }
+      if (cardValue && cardValue.action === "select_target_branch") {
+        await this.createPRFromBranches(context, convId, cardValue.targetBranch);
+        await next();
+        return;
+      }
+      if (cardValue && cardValue.action === "select_repo_for_fix") {
+        await agenticFix.continueFixBugFlow(context, this.sessions.get(convId), cardValue.repoId);
+        await next();
+        return;
+      }
+      if (cardValue && cardValue.action === "pipeline_select_repo") {
+        await pipelineCmd.showPipelinesForRepo(context, this.sessions.get(convId), cardValue.repoId, cardValue.intent);
+        await next();
+        return;
+      }
+      if (cardValue && cardValue.action === "pipeline_select_pipeline") {
+        await pipelineCmd.handlePipelineSelected(context, this.sessions.get(convId), cardValue.pipelineId);
+        await next();
+        return;
+      }
+      if (cardValue && cardValue.action === "pipeline_run") {
+        await pipelineCmd.triggerPipelineRun(context, this.sessions.get(convId), cardValue.branch);
+        await next();
+        return;
       }
 
       const text = (context.activity.text || "")
@@ -426,15 +445,35 @@ ${text}`;
         return;
       }
 
-      let msg = "📁 **Repositories:**\n\n";
-      for (const repo of repos) {
-        const branch = (repo.defaultBranch || "refs/heads/main").replace(
-          "refs/heads/",
-          "",
-        );
-        msg += `• **${repo.name}** (default: \`${branch}\`)\n`;
-      }
-      await context.sendActivity(msg);
+      const card = {
+        $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+        type: "AdaptiveCard",
+        version: "1.5",
+        body: [
+          { type: "TextBlock", text: `📁 Repositories — ${PROJECT}`, size: "Large", weight: "Bolder" },
+          { type: "TextBlock", text: `${repos.length} repo(s)`, isSubtle: true, size: "Small", spacing: "None" },
+          ...repos.map((repo) => {
+            const branch = (repo.defaultBranch || "refs/heads/main").replace("refs/heads/", "");
+            return {
+              type: "ColumnSet",
+              separator: true,
+              columns: [
+                {
+                  type: "Column",
+                  width: "stretch",
+                  items: [{ type: "TextBlock", text: `**${repo.name}**`, size: "Small", wrap: true }],
+                },
+                {
+                  type: "Column",
+                  width: "auto",
+                  items: [{ type: "TextBlock", text: branch, fontType: "Monospace", size: "Small", isSubtle: true }],
+                },
+              ],
+            };
+          }),
+        ],
+      };
+      await context.sendActivity(MessageFactory.attachment(CardFactory.adaptiveCard(card)));
     } catch (err) {
       console.error(err.response?.data || err.message);
       await context.sendActivity("Could not fetch repositories.");
