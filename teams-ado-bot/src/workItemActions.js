@@ -33,8 +33,14 @@ async function resolveADOIdentity(nameFragment) {
   }
 }
 
+function findWorkItem(session, itemNumber) {
+  return session.workItems[itemNumber - 1] ||
+    session.workItems.find((w) => w.id === itemNumber) ||
+    null;
+}
+
 async function assignWorkItem(context, session, itemNumber, assignTo) {
-  const workItem = session.workItems[itemNumber - 1];
+  const workItem = findWorkItem(session, itemNumber);
   if (!workItem) {
     await context.sendActivity(`Item #${itemNumber} not found. Run \`show bugs\` to reload the list.`);
     return;
@@ -72,7 +78,7 @@ async function assignWorkItem(context, session, itemNumber, assignTo) {
 }
 
 async function updateWorkItemStatus(context, session, itemNumber, newStatus) {
-  const workItem = session.workItems[itemNumber - 1];
+  const workItem = findWorkItem(session, itemNumber);
   if (!workItem) {
     await context.sendActivity(`Item #${itemNumber} not found. Run \`show bugs\` to reload the list.`);
     return;
@@ -110,7 +116,7 @@ async function updateWorkItemStatus(context, session, itemNumber, newStatus) {
 }
 
 async function addWorkItemComment(context, session, itemNumber, comment) {
-  const workItem = session.workItems[itemNumber - 1];
+  const workItem = findWorkItem(session, itemNumber);
   if (!workItem) {
     await context.sendActivity(`Item #${itemNumber} not found. Run \`show bugs\` to reload the list.`);
     return;
