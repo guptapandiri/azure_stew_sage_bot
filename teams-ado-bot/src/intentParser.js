@@ -18,6 +18,7 @@ Available intents:
 - "assign_work_item": Assign a work item to someone. params: { itemNumber: number, assignTo: string } — itemNumber is the list position shown in the last work item card; assignTo is "me" or the person's name.
 - "update_work_item_status": Change the status/state of a work item. params: { itemNumber: number, status: string } — status should be the exact state the user wants (e.g. "Active", "Resolved", "Done", "In Progress").
 - "add_comment": Add a comment to a work item. params: { itemNumber: number, comment: string }
+- "create_work_item": Create a new work item in ADO. params: { type: string, title: string, description: string|null, assignTo: string|null } — type is one of "Bug", "User Story", "Task", "Feature", "Epic" (default "Task" if unspecified). title is required. description and assignTo are optional; assignTo is "me" or a name.
 - "user_summary": Show a summary of open work items and active PRs for a user. params: { name: string } — use "me" if the user asks about themselves ("tell me about me", "my summary", "what do I have"), otherwise the person's name.
 - "chat": Any general question, coding help, debugging, explanation, architecture advice, or open-ended conversation not covered by the commands above. params: {}
 - "help": User explicitly asks for help or a list of commands. params: {}
@@ -62,6 +63,12 @@ Examples:
 "build logs" → {"intent":"pipeline_logs","params":{}}
 "pipeline status" → {"intent":"pipeline_status","params":{}}
 "list repos" → {"intent":"list_repos","params":{}}
+"create a bug: Login button is broken" → {"intent":"create_work_item","params":{"type":"Bug","title":"Login button is broken","description":null,"assignTo":null}}
+"add a user story: Users can reset their password" → {"intent":"create_work_item","params":{"type":"User Story","title":"Users can reset their password","description":null,"assignTo":null}}
+"create a task: Fix navbar styling and assign to John" → {"intent":"create_work_item","params":{"type":"Task","title":"Fix navbar styling","description":null,"assignTo":"John"}}
+"create bug titled Order page crashes on load" → {"intent":"create_work_item","params":{"type":"Bug","title":"Order page crashes on load","description":null,"assignTo":null}}
+"add a task: Update API docs and assign to me" → {"intent":"create_work_item","params":{"type":"Task","title":"Update API docs","description":null,"assignTo":"me"}}
+"create a feature: Dark mode support with description Users should be able to toggle dark mode" → {"intent":"create_work_item","params":{"type":"Feature","title":"Dark mode support","description":"Users should be able to toggle dark mode","assignTo":null}}
 "tell me about me" → {"intent":"user_summary","params":{"name":"me"}}
 "show my summary" → {"intent":"user_summary","params":{"name":"me"}}
 "what do I have" → {"intent":"user_summary","params":{"name":"me"}}

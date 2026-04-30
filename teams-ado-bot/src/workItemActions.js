@@ -1,7 +1,7 @@
 "use strict";
 
 const axios = require("axios");
-const { ORG, BASE_URL, HEADERS } = require("./adoConfig");
+const { ORG, PROJECT, BASE_URL, HEADERS } = require("./adoConfig");
 
 // Valid states per work item type (ADO Agile process)
 const VALID_STATES = {
@@ -147,4 +147,54 @@ async function addWorkItemComment(context, session, itemNumber, comment) {
   }
 }
 
-module.exports = { assignWorkItem, updateWorkItemStatus, addWorkItemComment };
+const VALID_TYPES = ["Bug", "User Story", "Task", "Feature", "Epic"];
+
+async function createWorkItem(context, type, title, description, assignTo) {
+  if (!title?.trim()) {
+    await context.sendActivity("❌ Please include a title, e.g. `create a bug: Login button is broken`");
+    return;
+  }
+
+  const matchedType = VALID_TYPES.find((t) => t.toLowerCase() === (type || "").toLowerCase()) || "Task";
+
+  await context.sendActivity({ type: "typing" });
+
+  const ops = [
+    { op: "add", path: "/fields/System.Title", value: title.trim() },
+  ];
+
+  if (description?.trim()) {
+    ops.push({ op: "add", path: "/fields/System.Description", value: description.trim() });
+  }
+
+  if (assignTo) {
+    const assignee = assignTo === "me" ? context.activity.from.name : assignTo;
+    const uniqueName = await resolveADOIdentity(assignee);
+    ops.push({ op: "add", path: "/fields/System.AssignedTo", value: uniqueName || assignee });
+  }
+
+  try {
+    const res = await axios.patch(
+      `${BASE_URL}/wit/workitems/${encodeURIComponent("$" + matchedType)}?api-version=7.1`,
+      ops,
+      { headers: { ...HEADERS, "Content-Type": "application/json-patch+json" } },
+    );
+
+    const item = res.data;
+    const itemUrl = `https://dev.azure.com/${ORG}/${PROJECT}/_workitems/edit/${item.id}`;
+    const assignedTo = item.fields["System.AssignedTo"]?.displayName || "Unassigned";
+
+    await context.sendActivity(
+      `✅ **${matchedType} Created!**\n\n` +
+      `**#${item.id}** · ${item.fields["System.Title"]}\n` +
+      `👤 Assigned to: ${assignedTo}\n` +
+      `🔗 [View in ADO](${itemUrl})`,
+    );
+  } catch (err) {
+    console.error("[workItemActions] createWorkItem error:", err.response?.data || err.message);
+    const detail = err.response?.data?.message || err.message;
+    await context.sendActivity(`❌ Could not create work item: ${detail}`);
+  }
+}
+
+module.exports = { assignWorkItem, updateWorkItemStatus, addWorkItemComment, createWorkItem };

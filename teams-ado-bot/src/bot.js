@@ -193,6 +193,9 @@ class AzureDevOpsBot extends TeamsActivityHandler {
       case "add_comment":
         await workItemActions.addWorkItemComment(context, session, params.itemNumber || 1, params.comment || "");
         break;
+      case "create_work_item":
+        await workItemActions.createWorkItem(context, params.type || "Task", params.title || "", params.description || null, params.assignTo || null);
+        break;
       case "user_summary":
         await this.showUserSummary(context, params.name || "me");
         break;
@@ -1194,6 +1197,8 @@ PR_DESCRIPTION:
           ["fix bug #25", "AI scans the repo, writes the code fix, and raises a PR — fully automatic"],
         ]),
         section("📌", "Work Item Actions", [
+          ["create a bug: Login button broken", "Create a new Bug, User Story, Task, Feature, or Epic"],
+          ["create a task: Fix navbar and assign to John", "Create and assign in one shot"],
           ["assign #17 to me", "Reassign a work item to yourself or anyone"],
           ["mark #14 as Active", "Update work item status"],
           ["add comment to #20: looks good", "Post a comment on a work item"],
