@@ -356,7 +356,9 @@ ${text}`;
         return;
       }
 
-      const bug = session.workItems[listNumber - 1];
+      const bug = session.workItems[listNumber - 1] ||
+        session.workItems.find((w) => w.id === listNumber) ||
+        null;
       if (!bug) {
         await context.sendActivity(
           `Item #${listNumber} not found. There are ${session.workItems.length} items loaded. Try again.`,
