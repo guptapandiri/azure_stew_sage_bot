@@ -45,45 +45,26 @@ class AzureDevOpsBot extends TeamsActivityHandler {
 
       // Handle Adaptive Card submit actions (e.g. repo selector for PR list)
       const cardValue = context.activity.value;
-      if (cardValue && cardValue.action === "select_repo") {
-        await this.showPRsForRepo(context, convId, cardValue.repoId, cardValue.status || "active", cardValue.assignedTo || null);
-        await next();
-        return;
-      }
-      if (cardValue && cardValue.action === "select_repo_for_pr") {
-        await this.showSourceBranchSelector(context, convId, cardValue.repoId);
-        await next();
-        return;
-      }
-      if (cardValue && cardValue.action === "select_source_branch") {
-        await this.showTargetBranchSelector(context, convId, cardValue.sourceBranch);
-        await next();
-        return;
-      }
-      if (cardValue && cardValue.action === "select_target_branch") {
-        await this.createPRFromBranches(context, convId, cardValue.targetBranch);
-        await next();
-        return;
-      }
-      if (cardValue && cardValue.action === "select_repo_for_fix") {
-        await agenticFix.continueFixBugFlow(context, this.sessions.get(convId), cardValue.repoId);
-        await next();
-        return;
-      }
-      if (cardValue && cardValue.action === "pipeline_select_repo") {
-        await pipelineCmd.showPipelinesForRepo(context, this.sessions.get(convId), cardValue.repoId, cardValue.intent);
-        await next();
-        return;
-      }
-      if (cardValue && cardValue.action === "pipeline_select_pipeline") {
-        await pipelineCmd.handlePipelineSelected(context, this.sessions.get(convId), cardValue.pipelineId);
-        await next();
-        return;
-      }
-      if (cardValue && cardValue.action === "pipeline_run") {
-        await pipelineCmd.triggerPipelineRun(context, this.sessions.get(convId), cardValue.branch);
-        await next();
-        return;
+      if (cardValue && cardValue.action) {
+        const session = this.sessions.get(convId);
+        // Fire and forget all card actions — lets Teams get an immediate 200
+        // response so it never shows "Something went wrong" on long operations.
+        const cardHandlers = {
+          select_repo: () => this.showPRsForRepo(context, convId, cardValue.repoId, cardValue.status || "active", cardValue.assignedTo || null),
+          select_repo_for_pr: () => this.showSourceBranchSelector(context, convId, cardValue.repoId),
+          select_source_branch: () => this.showTargetBranchSelector(context, convId, cardValue.sourceBranch),
+          select_target_branch: () => this.createPRFromBranches(context, convId, cardValue.targetBranch),
+          select_repo_for_fix: () => agenticFix.continueFixBugFlow(context, session, cardValue.repoId),
+          pipeline_select_repo: () => pipelineCmd.showPipelinesForRepo(context, session, cardValue.repoId, cardValue.intent),
+          pipeline_select_pipeline: () => pipelineCmd.handlePipelineSelected(context, session, cardValue.pipelineId),
+          pipeline_run: () => pipelineCmd.triggerPipelineRun(context, session, cardValue.branch),
+        };
+        const handler = cardHandlers[cardValue.action];
+        if (handler) {
+          handler().catch((err) => console.error(`[bot] card action "${cardValue.action}" error:`, err.message));
+          await next();
+          return;
+        }
       }
 
       const text = (context.activity.text || "")
@@ -981,25 +962,96 @@ PR_DESCRIPTION:
   }
 
   async showHelp(context) {
+    const section = (emoji, title, commands) => ({
+      type: "Container",
+      spacing: "Medium",
+      items: [
+        {
+          type: "TextBlock",
+          text: `${emoji} **${title}**`,
+          weight: "Bolder",
+          size: "Small",
+          color: "Accent",
+        },
+        ...commands.map(([cmd, desc]) => ({
+          type: "ColumnSet",
+          spacing: "Small",
+          columns: [
+            {
+              type: "Column",
+              width: "auto",
+              items: [{ type: "TextBlock", text: cmd, fontType: "Monospace", size: "Small", wrap: true }],
+            },
+            {
+              type: "Column",
+              width: "stretch",
+              items: [{ type: "TextBlock", text: desc, size: "Small", isSubtle: true, wrap: true }],
+            },
+          ],
+        })),
+      ],
+    });
+
+    const card = {
+      $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+      type: "AdaptiveCard",
+      version: "1.5",
+      body: [
+        {
+          type: "TextBlock",
+          text: "🤖 StewSage — Your AI Dev Workspace",
+          size: "Large",
+          weight: "Bolder",
+        },
+        {
+          type: "TextBlock",
+          text: "Just chat naturally — no exact keywords needed.",
+          isSubtle: true,
+          size: "Small",
+          spacing: "None",
+        },
+        section("🐛", "Work Items", [
+          ["show bugs", "List open bugs and user stories"],
+          ["show my bugs", "Filter by assigned to you"],
+          ["show tasks assigned to John", "Filter by any team member"],
+          ["show everything", "All work items across all types"],
+        ]),
+        section("🔧", "AI Bug Fix", [
+          ["fix bug #25", "AI scans the repo, writes the code fix, and raises a PR — fully automatic"],
+        ]),
+        section("📌", "Work Item Actions", [
+          ["assign #17 to me", "Reassign a work item to yourself or anyone"],
+          ["mark #14 as Active", "Update work item status"],
+          ["add comment to #20: looks good", "Post a comment on a work item"],
+        ]),
+        section("🔀", "Pull Requests", [
+          ["raise PR", "Pick repo & branches — AI writes the title and description"],
+          ["list PRs", "Browse active pull requests"],
+          ["show my PRs", "PRs you created or are reviewing"],
+          ["show completed PRs", "Filter by status: active / completed / abandoned / all"],
+        ]),
+        section("🚀", "Pipelines", [
+          ["run pipeline", "Select repo → pipeline → branch, then trigger a build"],
+          ["pipeline status", "View recent runs for a pipeline"],
+          ["pipeline logs", "Fetch failed run logs with AI root cause analysis"],
+        ]),
+        section("📁", "Project", [
+          ["sprint status", "Current sprint name and dates"],
+          ["list repos", "Browse all repositories"],
+        ]),
+        {
+          type: "TextBlock",
+          text: "💡 Or just ask me anything — I can answer code and architecture questions too!",
+          size: "Small",
+          isSubtle: true,
+          spacing: "Medium",
+          wrap: true,
+        },
+      ],
+    };
+
     await context.sendActivity(
-      "🤖 **StewSage — Your AI Dev Workspace:**\n\n" +
-        "🐛 `show bugs` — List open bugs and user stories\n" +
-        "🐛 `show my bugs` — Filter by assigned to you\n" +
-        "🐛 `show tasks assigned to John` — Filter by any team member\n" +
-        "🔧 `fix bug 2` — AI scans the repo, generates a code fix, and raises a PR automatically\n" +
-        "📌 `assign item 2 to me` — Reassign a work item\n" +
-        "🔄 `mark item 1 as Active` — Update work item status\n" +
-        "💬 `add comment to item 3: looks good` — Comment on a work item\n" +
-        "🔀 `raise PR` — Pick repo & branches, AI writes the PR title and description\n" +
-        "📋 `list PRs` — Browse active pull requests\n" +
-        "📋 `show my PRs` — PRs you created or are reviewing\n" +
-        "📋 `show all PRs` / `show completed PRs` — Filter by status\n" +
-        "🏃 `sprint status` — View current sprint name and dates\n" +
-        "🚀 `run pipeline` — Select repo → pipeline → branch, then trigger a build\n" +
-        "📊 `pipeline status` — View recent runs for a pipeline\n" +
-        "📋 `pipeline logs` — Fetch failed run logs with AI root cause analysis\n" +
-        "📁 `list repos` — Browse all repositories\n" +
-        "💡 Or just ask me anything — I can answer code questions too!",
+      MessageFactory.attachment(CardFactory.adaptiveCard(card)),
     );
   }
 
