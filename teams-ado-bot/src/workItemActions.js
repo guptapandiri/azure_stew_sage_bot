@@ -73,7 +73,13 @@ async function assignWorkItem(context, session, itemNumber, assignTo) {
   } catch (err) {
     console.error("[workItemActions] assignWorkItem error:", err.response?.data || err.message);
     const detail = err.response?.data?.message || err.message;
-    await context.sendActivity(`❌ Could not assign work item: ${detail}`);
+    if (detail.toLowerCase().includes("unknown identity")) {
+      await context.sendActivity(
+        `❌ Could not find **"${assignTo}"** in Azure DevOps.\n\nTry using their full display name, e.g. \`assign #${workItem.id} to Gupta Pandiri\``
+      );
+    } else {
+      await context.sendActivity(`❌ Could not assign work item: ${detail}`);
+    }
   }
 }
 

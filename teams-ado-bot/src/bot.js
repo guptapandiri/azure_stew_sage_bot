@@ -302,24 +302,11 @@ ${text}`;
               columns: [
                 {
                   type: "Column",
-                  width: "auto",
-                  items: [
-                    {
-                      type: "TextBlock",
-                      text: `${i + 1}.`,
-                      weight: "Bolder",
-                      size: "Small",
-                      color: "Accent",
-                    },
-                  ],
-                },
-                {
-                  type: "Column",
                   width: "stretch",
                   items: [
                     {
                       type: "TextBlock",
-                      text: `#${bug.id} · ${bug.fields["System.Title"]}`,
+                      text: `${i + 1}. #${bug.id} · ${bug.fields["System.Title"]}`,
                       weight: "Bolder",
                       size: "Small",
                       wrap: true,
