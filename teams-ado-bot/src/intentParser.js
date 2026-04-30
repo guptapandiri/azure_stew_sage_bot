@@ -6,7 +6,7 @@ const SYSTEM_PROMPT = `You are a command parser for a Microsoft Teams bot that i
 Parse the user message and return a JSON object with "intent" and "params".
 
 Available intents:
-- "show_work_items": View work items. params: { types: string[], assignedTo: string|null } — types is a subset of ["Bug","User Story","Task","Feature","Epic"]. Map "stories"/"user stories" → "User Story", "bugs" → "Bug", "tasks" → "Task", "features" → "Feature", "epics" → "Epic". Default to ["Bug","User Story"] when user doesn't specify a type. Use all five only when user explicitly asks for everything/all items. assignedTo is null unless the user says "assigned to me" (use "me") or "assigned to <name>" (use that name).
+- "show_work_items": View work items. params: { types: string[], assignedTo: string|null } — types is a subset of ["Bug","User Story","Task","Feature","Epic"]. Map "stories"/"user stories" → "User Story", "bugs" → "Bug", "tasks" → "Task", "features" → "Feature", "epics" → "Epic". Default to ["Bug","User Story"] when user doesn't specify a type. Use all five only when user explicitly asks for everything/all items. IMPORTANT: assignedTo is null unless the user says "my bugs"/"my tasks"/"my stories" (possessive "my") or "assigned to me/name". The word "me" in phrases like "show me the bugs" or "show me user stories" is conversational — it does NOT mean assigned to the user. Only set assignedTo when the user explicitly says "my" or "assigned to".
 - "fix_bug": Fix a specific item by its list number. params: { bugNumber: number }
 - "raise_pr": Create a pull request. params: {}
 - "list_prs": View pull requests. params: { status: string, assignedTo: string|null } — status is one of "active","completed","abandoned","all"; default "active". assignedTo is null unless user says "my PRs"/"assigned to me" (use "me") or "assigned to <name>"/"created by <name>" (use that name).
@@ -25,8 +25,11 @@ Use "chat" for anything the user wants answered. Use "help" only when the user e
 
 Examples:
 "show bugs" → {"intent":"show_work_items","params":{"types":["Bug"],"assignedTo":null}}
+"show me the bugs" → {"intent":"show_work_items","params":{"types":["Bug"],"assignedTo":null}}
 "show my bugs" → {"intent":"show_work_items","params":{"types":["Bug"],"assignedTo":"me"}}
 "show user stories" → {"intent":"show_work_items","params":{"types":["User Story"],"assignedTo":null}}
+"show me the user stories" → {"intent":"show_work_items","params":{"types":["User Story"],"assignedTo":null}}
+"show me all the work items" → {"intent":"show_work_items","params":{"types":["Bug","User Story","Task","Feature","Epic"],"assignedTo":null}}
 "show stories" → {"intent":"show_work_items","params":{"types":["User Story"],"assignedTo":null}}
 "show my user stories" → {"intent":"show_work_items","params":{"types":["User Story"],"assignedTo":"me"}}
 "show tasks" → {"intent":"show_work_items","params":{"types":["Task"],"assignedTo":null}}
