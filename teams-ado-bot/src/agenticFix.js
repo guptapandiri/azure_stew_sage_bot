@@ -3,7 +3,7 @@
 const axios = require("axios");
 const { MessageFactory, CardFactory } = require("botbuilder");
 const { generateText } = require("./aiProvider");
-const { BASE_URL, HEADERS } = require("./adoConfig");
+const { ORG, PROJECT, BASE_URL, HEADERS } = require("./adoConfig");
 
 async function showRepoSelectorForFix(context, bugDetails, repos) {
   const card = {
