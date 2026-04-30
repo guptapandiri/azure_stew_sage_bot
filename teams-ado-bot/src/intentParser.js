@@ -6,7 +6,7 @@ const SYSTEM_PROMPT = `You are a command parser for a Microsoft Teams bot that i
 Parse the user message and return a JSON object with "intent" and "params".
 
 Available intents:
-- "show_work_items": View work items. params: { types: string[], assignedTo: string|null } — types is a subset of ["Bug","User Story","Task","Feature","Epic"]; default to ["Bug","User Story"] when user says "show bugs"/"show stories"/doesn't specify; use all five only when user explicitly asks for everything. assignedTo is null unless the user says "assigned to me" (use "me") or "assigned to <name>" (use that name).
+- "show_work_items": View work items. params: { types: string[], assignedTo: string|null } — types is a subset of ["Bug","User Story","Task","Feature","Epic"]. Map "stories"/"user stories" → "User Story", "bugs" → "Bug", "tasks" → "Task", "features" → "Feature", "epics" → "Epic". Default to ["Bug","User Story"] when user doesn't specify a type. Use all five only when user explicitly asks for everything/all items. assignedTo is null unless the user says "assigned to me" (use "me") or "assigned to <name>" (use that name).
 - "fix_bug": Fix a specific item by its list number. params: { bugNumber: number }
 - "raise_pr": Create a pull request. params: {}
 - "list_prs": View pull requests. params: { status: string, assignedTo: string|null } — status is one of "active","completed","abandoned","all"; default "active". assignedTo is null unless user says "my PRs"/"assigned to me" (use "me") or "assigned to <name>"/"created by <name>" (use that name).
@@ -26,9 +26,17 @@ Use "chat" for anything the user wants answered. Use "help" only when the user e
 Examples:
 "show bugs" → {"intent":"show_work_items","params":{"types":["Bug"],"assignedTo":null}}
 "show my bugs" → {"intent":"show_work_items","params":{"types":["Bug"],"assignedTo":"me"}}
+"show user stories" → {"intent":"show_work_items","params":{"types":["User Story"],"assignedTo":null}}
+"show stories" → {"intent":"show_work_items","params":{"types":["User Story"],"assignedTo":null}}
+"show my user stories" → {"intent":"show_work_items","params":{"types":["User Story"],"assignedTo":"me"}}
+"show tasks" → {"intent":"show_work_items","params":{"types":["Task"],"assignedTo":null}}
+"show my tasks" → {"intent":"show_work_items","params":{"types":["Task"],"assignedTo":"me"}}
 "show tasks assigned to John" → {"intent":"show_work_items","params":{"types":["Task"],"assignedTo":"John"}}
+"show features" → {"intent":"show_work_items","params":{"types":["Feature"],"assignedTo":null}}
+"show epics" → {"intent":"show_work_items","params":{"types":["Epic"],"assignedTo":null}}
 "show bugs and user stories" → {"intent":"show_work_items","params":{"types":["Bug","User Story"],"assignedTo":null}}
 "show all work items" → {"intent":"show_work_items","params":{"types":["Bug","User Story","Task","Feature","Epic"],"assignedTo":null}}
+"show everything" → {"intent":"show_work_items","params":{"types":["Bug","User Story","Task","Feature","Epic"],"assignedTo":null}}
 "fix bug 3" → {"intent":"fix_bug","params":{"bugNumber":3}}
 "raise a PR" → {"intent":"raise_pr","params":{}}
 "show PRs" → {"intent":"list_prs","params":{"status":"active","assignedTo":null}}
@@ -63,6 +71,8 @@ async function parseIntent(text) {
     const prompt = SYSTEM_PROMPT.replace("{{MESSAGE}}", text);
     const response = await generateText(prompt);
     const match = response.match(/\{[\s\S]*\}/);
+
+    console.log("[intentParser] AI response:", response);
     if (!match) return null;
     const parsed = JSON.parse(match[0]);
     if (!parsed.intent) return null;
