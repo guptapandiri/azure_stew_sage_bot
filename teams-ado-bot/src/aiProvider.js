@@ -10,7 +10,9 @@ let _generate = null;
 if (provider === "google") {
   const { GoogleGenerativeAI } = require("@google/generative-ai");
   const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const model = genAI.getGenerativeModel({
+    model: "gemini-3.1-flash-lite-preview",
+  });
   _generate = async (prompt) => {
     const result = await model.generateContent(prompt);
     return result.response.text();
@@ -28,7 +30,7 @@ if (provider === "google") {
   };
 } else {
   console.warn(
-    `[aiProvider] AI_PROVIDER is "${process.env.AI_PROVIDER}" — expected "google" or "openai". AI features will be disabled.`
+    `[aiProvider] AI_PROVIDER is "${process.env.AI_PROVIDER}" — expected "google" or "openai". AI features will be disabled.`,
   );
 }
 
@@ -41,7 +43,7 @@ console.log(`[aiProvider] Active provider: ${provider || "none"}`);
 async function generateText(prompt) {
   if (!_generate) {
     throw new Error(
-      `AI_PROVIDER is not configured correctly. Set AI_PROVIDER=google or AI_PROVIDER=openai in .env`
+      `AI_PROVIDER is not configured correctly. Set AI_PROVIDER=google or AI_PROVIDER=openai in .env`,
     );
   }
   return _generate(prompt);
